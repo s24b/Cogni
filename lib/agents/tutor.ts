@@ -77,6 +77,21 @@ Always prefer course materials first. Only search for information directly relev
 - Current mode: ${mode}`
 }
 
+export async function createSession(
+  userId: string,
+  courseId: string,
+  mode: TutorMode
+): Promise<string> {
+  const service = createServiceClient()
+  const { data: newSession } = await service
+    .from('session_log')
+    .insert({ user_id: userId, course_id: courseId, mode })
+    .select('session_id')
+    .single()
+
+  return newSession!.session_id
+}
+
 export async function getOrCreateSession(
   userId: string,
   courseId: string,
@@ -98,13 +113,18 @@ export async function getOrCreateSession(
 
   if (existing) return existing.session_id
 
-  const { data: newSession } = await service
-    .from('session_log')
-    .insert({ user_id: userId, course_id: courseId, mode })
-    .select('session_id')
-    .single()
+  return createSession(userId, courseId, mode)
+}
 
-  return newSession!.session_id
+export async function listUserSessions(userId: string) {
+  const service = createServiceClient()
+  const { data } = await service
+    .from('session_log')
+    .select('session_id, course_id, name, mode, created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(50)
+  return data ?? []
 }
 
 export async function getSessionMessages(sessionId: string) {

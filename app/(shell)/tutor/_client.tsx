@@ -285,7 +285,8 @@ function readAsBase64(file: File): Promise<string> {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function TutorClient({ courses, sessions }: { courses: Course[]; sessions: Session[] }) {
+export function TutorClient({ courses, sessions: initialSessions }: { courses: Course[]; sessions: Session[] }) {
+  const [sessions, setSessions] = useState<Session[]>(initialSessions)
   const [activeCourse, setActiveCourse] = useState<Course | null>(null)
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [mode, setMode] = useState<Mode>('answer')
@@ -297,13 +298,16 @@ export function TutorClient({ courses, sessions }: { courses: Course[]; sessions
   const [splitExpanded, setSplitExpanded] = useState(false)
   const [showOptions, setShowOptions] = useState(false)
   const [attachments, setAttachments] = useState<LocalAttachment[]>([])
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const forceNewRef = useRef(false)
+  const messagesRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const inputWrapperRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const el = messagesRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
   }, [messages])
 
   // Close options panel on click outside
@@ -366,7 +370,7 @@ export function TutorClient({ courses, sessions }: { courses: Course[]; sessions
     }
   }
 
-  function startNewSession(course: Course) {
+  function selectCourse(course: Course) {
     setActiveCourse(course)
     setActiveSessionId(null)
     setMessages([{ role: 'system', content: MODES.find(m => m.value === mode)!.description }])
@@ -374,6 +378,24 @@ export function TutorClient({ courses, sessions }: { courses: Course[]; sessions
     setAttachments([])
     setSplitContent(null)
     setSplitExpanded(false)
+    forceNewRef.current = false
+  }
+
+  function startNewSession(course: Course) {
+    selectCourse(course)
+    forceNewRef.current = true
+  }
+
+  async function refreshSessions() {
+    try {
+      const res = await fetch('/api/agents/tutor/sessions')
+      if (res.ok) {
+        const { sessions: fresh } = await res.json() as { sessions: Session[] }
+        setSessions(fresh)
+      }
+    } catch {
+      // non-critical
+    }
   }
 
   async function loadSession(session: Session) {
@@ -416,6 +438,9 @@ export function TutorClient({ courses, sessions }: { courses: Course[]; sessions
     const assistantMsg: Message = { role: 'assistant', content: '', streaming: true }
     setMessages(prev => [...prev, userMsg, assistantMsg])
 
+    const wasForceNew = forceNewRef.current
+    forceNewRef.current = false
+
     try {
       const res = await fetch('/api/agents/tutor', {
         method: 'POST',
@@ -427,6 +452,7 @@ export function TutorClient({ courses, sessions }: { courses: Course[]; sessions
           mode,
           deepThink,
           sessionId: activeSessionId,
+          forceNew: wasForceNew,
           attachments: sentAttachments.map(a => ({ name: a.name, type: a.type, data: a.data })),
         }),
       })
@@ -442,7 +468,10 @@ export function TutorClient({ courses, sessions }: { courses: Course[]; sessions
       }
 
       const newSessionId = res.headers.get('X-Session-Id')
-      if (newSessionId && !activeSessionId) setActiveSessionId(newSessionId)
+      if (newSessionId && !activeSessionId) {
+        setActiveSessionId(newSessionId)
+        refreshSessions()
+      }
 
       const reader = res.body?.getReader()
       const decoder = new TextDecoder()
@@ -602,7 +631,7 @@ export function TutorClient({ courses, sessions }: { courses: Course[]; sessions
               {courses.map(course => (
                 <StaggerItem key={course.course_id}>
                   <motion.button
-                    onClick={() => startNewSession(course)}
+                    onClick={() => selectCourse(course)}
                     className="flex w-full items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 text-left hover:bg-muted/30 transition-colors"
                     whileTap={{ scale: 0.99 }}
                     transition={{ duration: 0.1 }}
@@ -685,7 +714,7 @@ export function TutorClient({ courses, sessions }: { courses: Course[]; sessions
         </div>
 
         {/* Messages */}
-        <div className="flex flex-1 flex-col gap-6 overflow-y-auto overscroll-contain min-h-0 px-10 py-6">
+        <div ref={messagesRef} className="flex flex-1 flex-col gap-6 overflow-y-auto overscroll-contain min-h-0 px-10 py-6">
           {messages.length === 0 && (
             <motion.div
               initial={{ opacity: 0, y: 8 }}
@@ -761,7 +790,6 @@ export function TutorClient({ courses, sessions }: { courses: Course[]; sessions
               </motion.div>
             ))}
           </AnimatePresence>
-          <div ref={bottomRef} />
         </div>
 
         {/* Prompt bar — sticky at bottom */}

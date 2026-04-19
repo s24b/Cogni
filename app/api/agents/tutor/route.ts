@@ -3,6 +3,7 @@ import { getUserApiKey } from '@/lib/vault'
 import {
   buildTutorSystemPrompt,
   getOrCreateSession,
+  createSession,
   getSessionMessages,
   saveMessage,
   autoNameSession,
@@ -61,6 +62,7 @@ export async function POST(request: Request) {
     mode?: TutorMode
     deepThink?: boolean
     sessionId?: string
+    forceNew?: boolean
     attachments?: Attachment[]
   }
 
@@ -71,6 +73,7 @@ export async function POST(request: Request) {
     mode = 'answer',
     deepThink = false,
     sessionId: existingSessionId,
+    forceNew = false,
     attachments = [],
   } = body
 
@@ -85,7 +88,10 @@ export async function POST(request: Request) {
   const apiKey = await getUserApiKey(user.id)
   if (!apiKey) return NextResponse.json({ error: 'No API key configured' }, { status: 402 })
 
-  const sessionId = existingSessionId ?? await getOrCreateSession(user.id, courseId, mode)
+  const sessionId = existingSessionId
+    ?? (forceNew
+      ? await createSession(user.id, courseId, mode)
+      : await getOrCreateSession(user.id, courseId, mode))
   await saveMessage(sessionId, user.id, 'user', message)
 
   const [systemPrompt, history] = await Promise.all([
