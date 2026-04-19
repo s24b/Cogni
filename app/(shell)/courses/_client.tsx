@@ -8,7 +8,7 @@ import {
   Lightning,
   CircleNotch,
   Cards,
-  Brain,
+  BookOpen,
 } from '@phosphor-icons/react'
 
 type Topic = {
@@ -116,7 +116,7 @@ function CourseCard({ course }: { course: Course }) {
         className="flex w-full items-center gap-3 px-5 py-4 text-left hover:bg-muted/20 transition-colors"
       >
         <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-          <Brain size={18} className="text-primary" weight="fill" />
+          <BookOpen size={18} className="text-primary" weight="fill" />
         </div>
         <div className="flex flex-1 flex-col min-w-0">
           <span className="text-sm font-semibold text-foreground truncate">{course.name}</span>
@@ -151,7 +151,7 @@ export function CoursesClient({ courses }: { courses: Course[] }) {
   if (courses.length === 0) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 py-16 text-center p-6">
-        <Brain size={36} className="text-muted-foreground/40" />
+        <BookOpen size={36} className="text-muted-foreground/40" />
         <p className="text-sm text-muted-foreground">No courses yet. Complete onboarding to get started.</p>
       </div>
     )
