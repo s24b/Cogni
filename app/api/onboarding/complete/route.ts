@@ -1,5 +1,6 @@
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { initWiki } from '@/lib/wiki'
+import { runProfiler } from '@/lib/agents/profiler'
 import { NextResponse } from 'next/server'
 
 type CourseInput = {
@@ -13,6 +14,13 @@ type SyllabusInput = {
   courseTemp: number
   storagePath: string
   fileName: string
+}
+
+function inferFileType(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? ''
+  if (ext === 'pdf') return 'pdf'
+  if (ext === 'md') return 'md'
+  return 'txt'
 }
 
 export async function POST(request: Request) {
@@ -43,6 +51,7 @@ export async function POST(request: Request) {
   }
 
   const courseIdMap: Record<number, string> = {}
+  const courseNameMap: Record<number, string> = {}
 
   for (const course of courses) {
     let professorId = course.existingProfessorId
@@ -71,24 +80,50 @@ export async function POST(request: Request) {
     }
 
     courseIdMap[course.tempIndex] = courseRow.course_id
+    courseNameMap[course.tempIndex] = course.name.trim()
   }
+
+  // Insert syllabuses and collect IDs for profiling
+  const syllabusJobs: { materialId: string; courseId: string; courseName: string; fileName: string }[] = []
 
   for (const syl of syllabuses) {
     const courseId = courseIdMap[syl.courseTemp]
     if (!courseId) continue
 
-    await service.from('materials').insert({
-      user_id: user.id,
-      course_id: courseId,
-      filename: syl.fileName,
-      storage_path: syl.storagePath,
-      tier: 1,
-      file_type: 'pdf',
-      processing_status: 'pending',
-    })
+    const fileType = inferFileType(syl.fileName)
+
+    const { data: material } = await service
+      .from('materials')
+      .insert({
+        user_id: user.id,
+        course_id: courseId,
+        filename: syl.fileName,
+        storage_path: syl.storagePath,
+        tier: 1,
+        file_type: fileType,
+        processing_status: 'processed', // already uploaded, skip inbox pipeline
+      })
+      .select('material_id')
+      .single()
+
+    if (material) {
+      syllabusJobs.push({
+        materialId: material.material_id,
+        courseId,
+        courseName: courseNameMap[syl.courseTemp],
+        fileName: syl.fileName,
+      })
+    }
   }
 
   await initWiki(user.id)
+
+  // Run profiler for each syllabus (extracts topics + updates wiki)
+  await Promise.all(
+    syllabusJobs.map(job =>
+      runProfiler(user.id, job.materialId, job.courseId, job.courseName)
+    )
+  )
 
   return NextResponse.json({ ok: true })
 }

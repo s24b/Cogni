@@ -18,6 +18,21 @@ export async function POST(request: Request) {
   }
 
   const service = createServiceClient()
+
+  // Reject duplicates by filename
+  const { data: existing } = await service
+    .from('materials')
+    .select('material_id')
+    .eq('user_id', user.id)
+    .eq('filename', file.name)
+    .limit(1)
+
+  if (existing && existing.length > 0) {
+    return NextResponse.json(
+      { error: `"${file.name}" has already been uploaded. Delete the existing one first if you want to re-upload.` },
+      { status: 409 }
+    )
+  }
   const storagePath = `${user.id}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
 
   const { error: uploadError } = await service.storage
