@@ -82,7 +82,7 @@ export default async function TodayPage() {
         </div>
       ) : (
         <div className="flex flex-col gap-3">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Your Courses</h2>
+          <h2 className="text-sm font-semibold text-muted-foreground">Your courses</h2>
           {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
           {(courses as any[]).map((course) => {
             const profName = Array.isArray(course.professors)

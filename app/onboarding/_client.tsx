@@ -304,16 +304,15 @@ export default function OnboardingClient({ googleName }: { googleName: string })
       const syl = syllabuses.find(s => s.courseId === courses[i].id)
       if (!syl?.file) continue
 
-      const path = `${user.id}/syllabuses/${Date.now()}_${syl.file.name}`
-      const { data, error } = await supabase.storage
-        .from('materials')
-        .upload(path, syl.file)
-
-      if (error) {
-        console.warn('Syllabus upload failed:', error.message)
+      const form = new FormData()
+      form.append('file', syl.file)
+      const res = await fetch('/api/onboarding/upload-syllabus', { method: 'POST', body: form })
+      if (!res.ok) {
+        console.warn('Syllabus upload failed:', await res.text())
         continue
       }
-      syllabusUploads.push({ courseTemp: i, storagePath: data.path, fileName: syl.file.name })
+      const { storagePath, fileName } = await res.json()
+      syllabusUploads.push({ courseTemp: i, storagePath, fileName })
     }
 
     // Write all records via onboarding complete route
