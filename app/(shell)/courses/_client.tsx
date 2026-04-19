@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   CaretDown,
   CaretRight,
@@ -10,6 +11,7 @@ import {
   Cards,
   BookOpen,
 } from '@phosphor-icons/react'
+import { StaggerList, StaggerItem, ease } from '@/components/ui/motion'
 
 type Topic = {
   topic_id: string
@@ -130,19 +132,39 @@ function CourseCard({ course }: { course: Course }) {
         </div>
       </button>
 
-      {open && course.topics.length > 0 && (
-        <div className="border-t border-border px-2 py-1">
-          {course.topics.map(topic => (
-            <TopicRow key={topic.topic_id} topic={topic} courseId={course.course_id} />
-          ))}
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {open && course.topics.length > 0 && (
+          <motion.div
+            key="topics"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto', transition: { duration: 0.25, ease } }}
+            exit={{ opacity: 0, height: 0, transition: { duration: 0.18, ease } }}
+            className="overflow-hidden border-t border-border"
+          >
+            <StaggerList className="px-2 py-1">
+              {course.topics.map(topic => (
+                <StaggerItem key={topic.topic_id}>
+                  <TopicRow topic={topic} courseId={course.course_id} />
+                </StaggerItem>
+              ))}
+            </StaggerList>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {open && course.topics.length === 0 && (
-        <div className="border-t border-border px-5 py-4 text-sm text-muted-foreground">
-          No topics yet — upload a syllabus in the Inbox to get started.
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {open && course.topics.length === 0 && (
+          <motion.div
+            key="empty"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto', transition: { duration: 0.25, ease } }}
+            exit={{ opacity: 0, height: 0, transition: { duration: 0.18, ease } }}
+            className="overflow-hidden border-t border-border px-5 py-4 text-sm text-muted-foreground"
+          >
+            No topics yet — upload a syllabus in the Inbox to get started.
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
@@ -166,11 +188,13 @@ export function CoursesClient({ courses }: { courses: Course[] }) {
         </p>
       </div>
 
-      <div className="flex flex-col gap-3">
+      <StaggerList className="flex flex-col gap-3">
         {courses.map(course => (
-          <CourseCard key={course.course_id} course={course} />
+          <StaggerItem key={course.course_id}>
+            <CourseCard course={course} />
+          </StaggerItem>
         ))}
-      </div>
+      </StaggerList>
     </div>
   )
 }

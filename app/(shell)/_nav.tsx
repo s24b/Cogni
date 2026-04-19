@@ -64,7 +64,7 @@ export function Sidebar() {
         })}
       </nav>
 
-      <div className="border-t border-border px-3 py-3">
+      <div className="border-t border-border px-3 py-3 mb-2">
         {(() => {
           const active = isActive(pathname, '/settings')
           return (

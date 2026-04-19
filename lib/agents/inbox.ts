@@ -95,13 +95,21 @@ Respond with exactly: {"course_id":"<uuid or null>","tier":<1-4>}`,
   let courseId: string | null = null
   let tier = 4
 
+  const raw = message.content[0].type === 'text' ? message.content[0].text : ''
+  const cleaned = raw
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/i, '')
+    .trim()
+  const match = cleaned.match(/\{[\s\S]*\}/)
+  const candidate = match ? match[0] : cleaned
+
   try {
-    const text = message.content[0].type === 'text' ? message.content[0].text.trim() : ''
-    const parsed = JSON.parse(text)
+    const parsed = JSON.parse(candidate)
     courseId = parsed.course_id ?? null
     tier = typeof parsed.tier === 'number' ? Math.max(1, Math.min(4, parsed.tier)) : 4
-  } catch {
-    // Default to unassigned if parse fails
+  } catch (e) {
+    console.error('[inbox] JSON parse failed. Raw response was:\n---\n' + raw.slice(0, 500) + '\n---', e)
   }
 
   const classificationStatus = courseId ? 'classified' : 'unassigned'

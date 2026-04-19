@@ -1,0 +1,331 @@
+import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { getUserApiKey } from '@/lib/vault'
+import {
+  buildTutorSystemPrompt,
+  getOrCreateSession,
+  getSessionMessages,
+  saveMessage,
+  autoNameSession,
+  type TutorMode,
+} from '@/lib/agents/tutor'
+import { readWikiFile, writeWikiFile } from '@/lib/wiki'
+import Anthropic from '@anthropic-ai/sdk'
+import { NextResponse } from 'next/server'
+
+type Attachment = {
+  name: string
+  type: string
+  data: string // base64 for images, plain text for text files
+}
+
+function buildUserContent(message: string, attachments: Attachment[]): Anthropic.ContentBlockParam[] {
+  const content: Anthropic.ContentBlockParam[] = []
+
+  for (const att of attachments) {
+    if (att.type.startsWith('image/')) {
+      const mediaType = att.type as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
+      content.push({
+        type: 'image',
+        source: { type: 'base64', media_type: mediaType, data: att.data },
+      })
+    } else {
+      content.push({
+        type: 'text',
+        text: `[Attached file: ${att.name}]\n${att.data}`,
+      })
+    }
+  }
+
+  content.push({ type: 'text', text: message })
+  return content
+}
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url)
+  const sessionId = searchParams.get('sessionId')
+  if (!sessionId) return NextResponse.json({ error: 'Missing sessionId' }, { status: 400 })
+
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const messages = await getSessionMessages(sessionId)
+  return NextResponse.json({ messages })
+}
+
+export async function POST(request: Request) {
+  const body = await request.json() as {
+    courseId: string
+    courseName: string
+    message: string
+    mode?: TutorMode
+    deepThink?: boolean
+    sessionId?: string
+    attachments?: Attachment[]
+  }
+
+  const {
+    courseId,
+    courseName,
+    message,
+    mode = 'answer',
+    deepThink = false,
+    sessionId: existingSessionId,
+    attachments = [],
+  } = body
+
+  if (!courseId || !message?.trim()) {
+    return NextResponse.json({ error: 'Missing courseId or message' }, { status: 400 })
+  }
+
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const apiKey = await getUserApiKey(user.id)
+  if (!apiKey) return NextResponse.json({ error: 'No API key configured' }, { status: 402 })
+
+  const sessionId = existingSessionId ?? await getOrCreateSession(user.id, courseId, mode)
+  await saveMessage(sessionId, user.id, 'user', message)
+
+  const [systemPrompt, history] = await Promise.all([
+    buildTutorSystemPrompt(user.id, courseId, courseName, mode),
+    getSessionMessages(sessionId),
+  ])
+
+  const client = new Anthropic({ apiKey })
+  const priorMessages = history.slice(0, -1)
+  const userContent = buildUserContent(message, attachments)
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tools: any[] = [
+    { type: 'web_search_20250305', name: 'web_search' },
+    {
+      name: 'create_flashcards',
+      description: 'Create a set of flashcards for the student. Call this whenever the student asks to make, generate, or create flashcards or study cards on any topic.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          topic: { type: 'string', description: 'The topic of the flashcards' },
+          cards: {
+            type: 'array',
+            description: 'The flashcard pairs',
+            items: {
+              type: 'object',
+              properties: {
+                front: { type: 'string', description: 'Question or term' },
+                back: { type: 'string', description: 'Answer or definition' },
+              },
+              required: ['front', 'back'],
+            },
+          },
+        },
+        required: ['topic', 'cards'],
+      },
+    },
+    {
+      name: 'create_quiz',
+      description: 'Create a practice quiz for the student. Call this whenever the student asks to make, generate, or create a quiz, practice test, or set of questions on any topic.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          topic: { type: 'string', description: 'The topic of the quiz' },
+          questions: {
+            type: 'array',
+            description: 'Quiz questions with multiple-choice options',
+            items: {
+              type: 'object',
+              properties: {
+                question: { type: 'string' },
+                options: { type: 'array', items: { type: 'string' }, description: '4 answer choices' },
+                answer: { type: 'string', description: 'The correct option text' },
+                explanation: { type: 'string', description: 'Brief explanation of the answer' },
+              },
+              required: ['question', 'options', 'answer', 'explanation'],
+            },
+          },
+        },
+        required: ['topic', 'questions'],
+      },
+    },
+    {
+      name: 'grade_answer',
+      description: 'Grade a student\'s answer to a verification question you explicitly posed. Call this only after the student has answered a question you asked to check their understanding.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          topic_name: { type: 'string', description: 'The topic being tested' },
+          score: { type: 'number', description: 'Score from 0.0 to 1.0' },
+          rationale: { type: 'string', description: 'Brief explanation of the score' },
+        },
+        required: ['topic_name', 'score', 'rationale'],
+      },
+    },
+    {
+      name: 'write_wiki_pattern',
+      description: 'Write a durable, non-obvious learning pattern about this student to their wiki. Only call for genuinely persistent patterns — not routine interactions.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          file: { type: 'string', enum: ['learning_profile.md', 'weak_areas.md'], description: 'Which wiki file to update' },
+          insight: { type: 'string', description: 'The specific insight to append (1-2 sentences)' },
+        },
+        required: ['file', 'insight'],
+      },
+    },
+  ]
+
+  const encoder = new TextEncoder()
+  const emit = (data: object) => encoder.encode(JSON.stringify(data) + '\n')
+
+  const readable = new ReadableStream({
+    async start(controller) {
+      try {
+        const messages: Anthropic.MessageParam[] = [
+          ...priorMessages.map((m: { role: string; content: string }) => ({
+            role: m.role as 'user' | 'assistant',
+            content: m.content,
+          })),
+          { role: 'user', content: userContent },
+        ]
+
+        let fullText = ''
+        let iterations = 0
+
+        while (iterations < 5) {
+          iterations++
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const streamParams: any = {
+            model: deepThink ? 'claude-opus-4-7' : 'claude-sonnet-4-6',
+            max_tokens: deepThink ? 16000 : 4096,
+            system: systemPrompt,
+            tools,
+            messages,
+          }
+
+          if (deepThink) {
+            streamParams.thinking = { type: 'enabled', budget_tokens: 8000 }
+          }
+
+          const stream = client.messages.stream(streamParams)
+          const toolInputs = new Map<number, { id: string; name: string; inputJson: string }>()
+
+          for await (const event of stream) {
+            if (event.type === 'content_block_start') {
+              if (event.content_block.type === 'tool_use') {
+                toolInputs.set(event.index, {
+                  id: event.content_block.id,
+                  name: event.content_block.name,
+                  inputJson: '',
+                })
+              }
+            } else if (event.type === 'content_block_delta') {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const delta = event.delta as any
+              if (delta.type === 'text_delta') {
+                fullText += delta.text
+                controller.enqueue(emit({ t: 'text', c: delta.text }))
+              } else if (delta.type === 'thinking_delta') {
+                controller.enqueue(emit({ t: 'think', c: delta.thinking }))
+              } else if (delta.type === 'input_json_delta') {
+                const blk = toolInputs.get(event.index)
+                if (blk) blk.inputJson += delta.partial_json
+              }
+            } else if (event.type === 'content_block_stop') {
+              // Emit search UI event once we have the full query
+              const blk = toolInputs.get(event.index)
+              if (blk?.name === 'web_search') {
+                try {
+                  const input = JSON.parse(blk.inputJson) as { query: string }
+                  controller.enqueue(emit({ t: 'search', q: input.query }))
+                } catch { /* malformed */ }
+              }
+            }
+          }
+
+          const final = await stream.finalMessage()
+
+          if (final.stop_reason === 'tool_use') {
+            const toolResults: Anthropic.ToolResultBlockParam[] = []
+
+            for (const block of final.content) {
+              if (block.type !== 'tool_use') continue
+              // web_search is handled server-side by Anthropic — skip
+              if (block.name === 'web_search') continue
+
+              if (block.name === 'create_flashcards') {
+                const input = block.input as { topic: string; cards: { front: string; back: string }[] }
+                controller.enqueue(emit({ t: 'card', kind: 'flashcards', topic: input.topic, count: input.cards.length, data: input.cards }))
+                toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: `Created ${input.cards.length} flashcards on "${input.topic}". Tell the student they're ready.` })
+              } else if (block.name === 'create_quiz') {
+                const input = block.input as { topic: string; questions: object[] }
+                controller.enqueue(emit({ t: 'card', kind: 'quiz', topic: input.topic, count: input.questions.length, data: input.questions }))
+                toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: `Created ${input.questions.length} quiz questions on "${input.topic}". Tell the student the quiz is ready.` })
+              } else if (block.name === 'grade_answer') {
+                const input = block.input as { topic_name: string; score: number; rationale: string }
+                const service = createServiceClient()
+                // Look up topic for this course, update mastery
+                const { data: topic } = await service
+                  .from('topics')
+                  .select('topic_id')
+                  .eq('course_id', courseId)
+                  .ilike('name', input.topic_name)
+                  .limit(1)
+                  .single()
+
+                if (topic) {
+                  await service.from('topic_mastery').upsert({
+                    user_id: user.id,
+                    topic_id: topic.topic_id,
+                    mastery_score: input.score,
+                  }, { onConflict: 'user_id,topic_id' })
+                }
+
+                controller.enqueue(emit({ t: 'grade', score: input.score, rationale: input.rationale, topic: input.topic_name }))
+                toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: 'Grade recorded.' })
+              } else if (block.name === 'write_wiki_pattern') {
+                const input = block.input as { file: string; insight: string }
+                const existing = await readWikiFile(user.id, input.file) ?? ''
+                const timestamp = new Date().toISOString().split('T')[0]
+                const updated = existing.trimEnd() + `\n\n- [${timestamp}] ${input.insight}`
+                await writeWikiFile(user.id, input.file, updated, 'tutor')
+                toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: 'Pattern recorded.' })
+              }
+            }
+
+            if (toolResults.length > 0) {
+              messages.push(
+                { role: 'assistant', content: final.content },
+                { role: 'user', content: toolResults },
+              )
+            } else {
+              break // only server-side tools (web_search), no custom tool results needed
+            }
+          } else {
+            break
+          }
+        }
+
+        controller.close()
+        await saveMessage(sessionId, user.id, 'assistant', fullText)
+
+        const isFirstExchange = priorMessages.length === 0
+        if (isFirstExchange) {
+          autoNameSession(sessionId, user.id, `Student: ${message}\nTutor: ${fullText}`, apiKey)
+        }
+      } catch (err) {
+        controller.enqueue(emit({ t: 'error', c: String(err) }))
+        controller.close()
+      }
+    },
+  })
+
+  return new Response(readable, {
+    headers: {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'X-Session-Id': sessionId,
+      'Transfer-Encoding': 'chunked',
+    },
+  })
+}

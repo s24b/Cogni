@@ -92,7 +92,7 @@ export async function POST(request: Request) {
 
     const fileType = inferFileType(syl.fileName)
 
-    const { data: material } = await service
+    const { data: material, error: materialError } = await service
       .from('materials')
       .insert({
         user_id: user.id,
@@ -106,6 +106,10 @@ export async function POST(request: Request) {
       .select('material_id')
       .single()
 
+    if (materialError) {
+      console.error('[onboarding] material insert failed', { file: syl.fileName, error: materialError })
+    }
+
     if (material) {
       syllabusJobs.push({
         materialId: material.material_id,
@@ -116,14 +120,22 @@ export async function POST(request: Request) {
     }
   }
 
+  console.log(`[onboarding] queued ${syllabusJobs.length} syllabus profiling jobs`)
+
   await initWiki(user.id)
 
   // Run profiler for each syllabus (extracts topics + updates wiki)
-  await Promise.all(
+  // Use allSettled so one failure doesn't prevent the response or other jobs
+  const results = await Promise.allSettled(
     syllabusJobs.map(job =>
       runProfiler(user.id, job.materialId, job.courseId, job.courseName)
     )
   )
+  results.forEach((r, i) => {
+    if (r.status === 'rejected') {
+      console.error(`[onboarding] profiler job ${i} (${syllabusJobs[i].fileName}) rejected`, r.reason)
+    }
+  })
 
   return NextResponse.json({ ok: true })
 }

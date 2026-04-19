@@ -32,11 +32,22 @@ Respond with exactly: {"cards":[{"front":"...","back":"...","hint":"..."},...]}`
     ],
   })
 
+  const raw = message.content[0].type === 'text' ? message.content[0].text : ''
+  const cleaned = raw
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/i, '')
+    .trim()
+  const match = cleaned.match(/\{[\s\S]*\}/)
+  const candidate = match ? match[0] : cleaned
+
   try {
-    const text = message.content[0].type === 'text' ? message.content[0].text.trim() : '{}'
-    const parsed = JSON.parse(text)
-    return Array.isArray(parsed.cards) ? parsed.cards.slice(0, 15) : []
-  } catch {
+    const parsed = JSON.parse(candidate)
+    if (Array.isArray(parsed.cards)) return parsed.cards.slice(0, 15)
+    console.error('[flashcard] parsed JSON but cards is not an array', parsed)
+    return []
+  } catch (e) {
+    console.error('[flashcard] JSON parse failed. Raw response was:\n---\n' + raw.slice(0, 500) + '\n---', e)
     return []
   }
 }

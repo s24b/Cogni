@@ -21,7 +21,7 @@ async function extractTopics(
         role: 'user',
         content: `Extract the main study topics from this syllabus for the course "${courseNames}".
 
-Return ONLY valid JSON — no other text.
+Return ONLY valid JSON — no other text, no markdown, no code fences.
 Rules:
 - Extract 8–25 main topics (not every sub-bullet, just meaningful study units)
 - Use the order they appear in the syllabus
@@ -35,11 +35,24 @@ Respond with exactly: {"topics":[{"name":"...","syllabus_order":1},{"name":"..."
     ],
   })
 
+  const raw = message.content[0].type === 'text' ? message.content[0].text : ''
+  // Strip markdown code fences if present, then extract the first {...} block.
+  const cleaned = raw
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/i, '')
+    .trim()
+
+  const match = cleaned.match(/\{[\s\S]*\}/)
+  const candidate = match ? match[0] : cleaned
+
   try {
-    const text = message.content[0].type === 'text' ? message.content[0].text.trim() : '{}'
-    const parsed = JSON.parse(text)
-    return Array.isArray(parsed.topics) ? parsed.topics : []
-  } catch {
+    const parsed = JSON.parse(candidate)
+    if (Array.isArray(parsed.topics)) return parsed.topics
+    console.error('[profiler] parsed JSON but topics is not an array', parsed)
+    return []
+  } catch (e) {
+    console.error('[profiler] JSON parse failed. Raw response was:\n---\n' + raw.slice(0, 500) + '\n---', e)
     return []
   }
 }
@@ -117,24 +130,34 @@ export async function runProfiler(
   courseId: string,
   courseName: string
 ): Promise<void> {
+  const tag = `[profiler ${courseName}]`
   const service = createServiceClient()
 
   const apiKey = await getUserApiKey(userId)
-  if (!apiKey) return
+  if (!apiKey) {
+    console.error(`${tag} no API key in vault for user ${userId}`)
+    return
+  }
 
-  const { data: material } = await service
+  const { data: material, error: materialError } = await service
     .from('materials')
     .select('storage_path, filename, file_type')
     .eq('material_id', materialId)
     .single()
 
-  if (!material?.storage_path) return
+  if (materialError || !material?.storage_path) {
+    console.error(`${tag} material lookup failed`, materialError)
+    return
+  }
 
-  const { data: fileData } = await service.storage
+  const { data: fileData, error: dlError } = await service.storage
     .from('materials')
     .download(material.storage_path)
 
-  if (!fileData) return
+  if (dlError || !fileData) {
+    console.error(`${tag} storage download failed for ${material.storage_path}`, dlError)
+    return
+  }
 
   const buffer = Buffer.from(await fileData.arrayBuffer())
   let syllabusText = ''
@@ -145,15 +168,31 @@ export async function runProfiler(
       const pdfParse = require('pdf-parse')
       const parsed = await pdfParse(buffer)
       syllabusText = parsed.text
-    } catch {
+    } catch (e) {
+      console.error(`${tag} pdf-parse failed, falling back to utf-8`, e)
       syllabusText = buffer.toString('utf-8')
     }
   } else {
     syllabusText = buffer.toString('utf-8')
   }
 
+  console.log(`${tag} extracted ${syllabusText.length} chars from ${material.filename}`)
+
+  if (syllabusText.trim().length < 50) {
+    console.error(`${tag} syllabus text too short (${syllabusText.length} chars) — skipping`)
+    return
+  }
+
   const client = new Anthropic({ apiKey })
-  const extractedTopics = await extractTopics(client, courseName, syllabusText)
+  let extractedTopics: ExtractedTopic[] = []
+  try {
+    extractedTopics = await extractTopics(client, courseName, syllabusText)
+  } catch (e) {
+    console.error(`${tag} Claude call failed`, e)
+    return
+  }
+
+  console.log(`${tag} Claude returned ${extractedTopics.length} topics`)
 
   if (extractedTopics.length === 0) return
 
@@ -168,7 +207,7 @@ export async function runProfiler(
 
   if (newTopics.length === 0) return
 
-  const { data: insertedTopics } = await service
+  const { data: insertedTopics, error: topicInsertError } = await service
     .from('topics')
     .insert(
       newTopics.map(t => ({
@@ -179,6 +218,13 @@ export async function runProfiler(
       }))
     )
     .select('topic_id')
+
+  if (topicInsertError) {
+    console.error(`${tag} topic insert failed`, topicInsertError)
+    return
+  }
+
+  console.log(`${tag} inserted ${insertedTopics?.length ?? 0} topics`)
 
   if (insertedTopics && insertedTopics.length > 0) {
     await service.from('topic_mastery').insert(
