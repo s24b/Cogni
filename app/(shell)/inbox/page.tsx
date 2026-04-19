@@ -1,10 +1,27 @@
-export default function InboxPage() {
-  return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
-      <p className="font-heading text-lg font-semibold text-foreground">Inbox</p>
-      <p className="max-w-xs text-sm text-muted-foreground">
-        Drop syllabuses, lecture notes, and study guides here. Cogni will classify and process them automatically.
-      </p>
-    </div>
-  )
+import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { redirect } from 'next/navigation'
+import { InboxClient } from './_client'
+
+export default async function InboxPage() {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/auth')
+
+  const service = createServiceClient()
+  const { data: items } = await service
+    .from('inbox_items')
+    .select(`
+      inbox_item_id,
+      classification_status,
+      course_id,
+      tier,
+      created_at,
+      materials ( filename, file_type ),
+      courses ( name )
+    `)
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
+    .limit(50)
+
+  return <InboxClient items={items ?? []} />
 }
