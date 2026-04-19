@@ -11,18 +11,18 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
-  User,
+  UserCircle,
   Key,
   Clock,
   BookOpen,
-  Upload,
-  Calendar,
+  UploadSimple,
+  CalendarBlank,
   Plus,
   X,
-  ChevronLeft,
-  ChevronRight,
-  CheckCircle2,
-} from 'lucide-react'
+  CaretLeft,
+  CaretRight,
+  CheckCircle,
+} from '@phosphor-icons/react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -73,14 +73,14 @@ function SyllabusCard({
       <p className="text-sm font-medium text-foreground">{courseName}</p>
       {file ? (
         <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm">
-          <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
+          <CheckCircle size={16} weight="fill" className="shrink-0 text-green-500" />
           <span className="truncate text-foreground">{file.name}</span>
           <button
             onClick={() => onFile(null)}
             className="ml-auto shrink-0 text-muted-foreground hover:text-foreground"
             aria-label="Remove file"
           >
-            <X className="h-3.5 w-3.5" />
+            <X size={14} />
           </button>
         </div>
       ) : (
@@ -93,7 +93,7 @@ function SyllabusCard({
           }`}
         >
           <input {...getInputProps()} />
-          <Upload className="mx-auto mb-1 h-4 w-4" />
+          <UploadSimple size={16} className="mx-auto mb-1" />
           {isDragActive ? 'Drop it here' : 'Drop PDF or TXT, or click to browse'}
         </div>
       )}
@@ -103,7 +103,7 @@ function SyllabusCard({
 
 // ─── Step icon ────────────────────────────────────────────────────────────────
 
-const STEP_ICONS = [User, Key, Clock, BookOpen, Upload, Calendar]
+const STEP_ICONS = [UserCircle, Key, Clock, BookOpen, UploadSimple, CalendarBlank]
 
 function StepIcon({ step }: { step: number }) {
   const Icon = STEP_ICONS[step]
@@ -114,7 +114,7 @@ function StepIcon({ step }: { step: number }) {
       animate={{ scale: 1, opacity: 1, transition: { duration: 0.3, ease: 'easeOut' } }}
       className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 md:self-center"
     >
-      <Icon className="h-7 w-7 text-primary" strokeWidth={1.5} />
+      <Icon size={28} weight="light" className="text-primary" />
     </motion.div>
   )
 }
@@ -457,7 +457,7 @@ export default function OnboardingClient({ googleName }: { googleName: string })
                 disabled={loading}
                 className="shrink-0"
               >
-                <ChevronLeft className="h-4 w-4" />
+                <CaretLeft size={16} />
               </Button>
             )}
 
@@ -477,12 +477,12 @@ export default function OnboardingClient({ googleName }: { googleName: string })
               ) : step === TOTAL_STEPS - 1 ? (
                 <>
                   Get started
-                  <ChevronRight className="ml-1 h-4 w-4" />
+                  <CaretRight size={16} className="ml-1" />
                 </>
               ) : (
                 <>
                   Continue
-                  <ChevronRight className="ml-1 h-4 w-4" />
+                  <CaretRight size={16} className="ml-1" />
                 </>
               )}
             </Button>
@@ -619,7 +619,7 @@ function StepApiKey({
       </div>
       {alreadySubmitted ? (
         <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-3 text-sm text-muted-foreground">
-          <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
+          <CheckCircle size={16} weight="fill" className="shrink-0 text-green-500" />
           API key already saved — you&apos;re good to continue.
         </div>
       ) : (
@@ -739,7 +739,7 @@ function StepCourses({
                   className="text-muted-foreground hover:text-foreground"
                   aria-label="Remove course"
                 >
-                  <X className="h-3.5 w-3.5" />
+                  <X size={14} />
                 </button>
               )}
             </div>
@@ -777,7 +777,7 @@ function StepCourses({
                           className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-muted/50"
                           onClick={() => onChooseProfessor(course.id, prof)}
                         >
-                          <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
+                          <CheckCircle size={14} weight="fill" className="text-primary" />
                           Use existing profile: {prof.name}
                         </button>
                       ))}
@@ -786,7 +786,7 @@ function StepCourses({
               </div>
               {course.existingProfessor && (
                 <p className="flex items-center gap-1 text-xs text-primary">
-                  <CheckCircle2 className="h-3 w-3" />
+                  <CheckCircle size={12} weight="fill" />
                   Using existing profile for {course.existingProfessor.name}
                 </p>
               )}
@@ -798,7 +798,7 @@ function StepCourses({
           onClick={addCourse}
           className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-border py-3 text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
         >
-          <Plus className="h-4 w-4" />
+          <Plus size={16} />
           Add another course
         </button>
       </div>
