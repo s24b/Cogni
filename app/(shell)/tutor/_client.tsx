@@ -652,7 +652,7 @@ export function TutorClient({ courses, sessions }: { courses: Course[]; sessions
     <div className="flex h-full overflow-hidden">
       {/* Chat panel */}
       <motion.div
-        className="flex min-h-0 flex-col"
+        className="flex min-h-0 flex-col overflow-hidden"
         animate={{ width: splitExpanded ? '38%' : '100%' }}
         transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
         style={{ minWidth: 0 }}
