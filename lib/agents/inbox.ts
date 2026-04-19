@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getUserApiKey } from '@/lib/vault'
 import { appendToLog } from '@/lib/wiki'
+import { runProfiler } from '@/lib/agents/profiler'
 
 type ClassifyResult = {
   courseId: string | null
@@ -121,6 +122,12 @@ Respond with exactly: {"course_id":"<uuid or null>","tier":<1-4>}`,
     userId,
     `Inbox agent classified "${filename}" → ${classificationStatus === 'classified' ? `${courseName} (Tier ${tier}: ${tierLabel})` : 'unassigned'}`
   )
+
+  // Auto-run profiler for syllabuses (tier 1) that were successfully classified
+  if (tier === 1 && courseId) {
+    const courseName2 = (courses ?? []).find((c: { course_id: string; name: string }) => c.course_id === courseId)?.name ?? 'Course'
+    await runProfiler(userId, materialId, courseId, courseName2)
+  }
 
   return { courseId, tier, status: classificationStatus }
 }
