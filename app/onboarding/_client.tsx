@@ -324,9 +324,8 @@ export default function OnboardingClient({ googleName }: { googleName: string })
       <div className="flex flex-1 flex-col">
 
         {/* Mobile-only logo header */}
-        <div className="flex items-center gap-2 px-6 pt-8 md:hidden">
-          <Image src="/logo.svg" alt="Cogni" width={28} height={28} priority />
-          <span className="font-heading text-base font-bold text-foreground">Cogni</span>
+        <div className="flex items-center px-6 pt-8 md:hidden">
+          <Image src="/logo.svg" alt="Cogni" width={120} height={41} priority />
         </div>
 
         {/* Scrollable content area */}
@@ -477,19 +476,15 @@ export default function OnboardingClient({ googleName }: { googleName: string })
 
         <div className="relative flex flex-col items-center gap-6 text-center">
           <Image
-            src="/logo.svg"
+            src="/logo-white.svg"
             alt="Cogni"
-            width={80}
-            height={80}
+            width={240}
+            height={82}
             priority
-            className="brightness-0 invert"
           />
-          <div>
-            <p className="font-heading text-3xl font-bold text-white lg:text-4xl">Cogni</p>
-            <p className="mt-2 text-base text-white/70 lg:text-lg">
-              Your personal AI study system.
-            </p>
-          </div>
+          <p className="mt-2 text-base text-white/70 lg:text-lg">
+            Your personal AI study system.
+          </p>
 
           <div className="mt-4 flex flex-col gap-3 text-left">
             {[
