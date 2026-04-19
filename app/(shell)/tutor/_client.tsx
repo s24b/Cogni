@@ -157,7 +157,7 @@ function ThinkingBlock({ thinking, done }: { thinking: string; done: boolean }) 
             transition={{ duration: 0.2, ease }}
             className="overflow-hidden"
           >
-            <div className="max-h-48 overflow-y-auto px-3 pb-3 font-mono text-[11px] leading-relaxed text-violet-800/70 dark:text-violet-300/60 whitespace-pre-wrap">
+            <div className="max-h-48 overflow-y-auto overscroll-contain px-3 pb-3 font-mono text-[11px] leading-relaxed text-violet-800/70 dark:text-violet-300/60 whitespace-pre-wrap">
               {thinking}
             </div>
           </motion.div>
@@ -587,7 +587,7 @@ export function TutorClient({ courses, sessions }: { courses: Course[]; sessions
   // ── Course picker ─────────────────────────────────────────────────────────
   if (!activeCourse) {
     return (
-      <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-6">
+      <div className="flex flex-1 flex-col gap-6 overflow-y-auto overscroll-contain p-6">
         <div>
           <h1 className="font-heading text-2xl font-semibold text-foreground">Tutor</h1>
           <p className="mt-1 text-sm text-muted-foreground">Pick a course to start a session.</p>
@@ -685,7 +685,7 @@ export function TutorClient({ courses, sessions }: { courses: Course[]; sessions
         </div>
 
         {/* Messages */}
-        <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-10 py-6">
+        <div className="flex flex-1 flex-col gap-6 overflow-y-auto overscroll-contain px-10 py-6">
           {messages.length === 0 && (
             <motion.div
               initial={{ opacity: 0, y: 8 }}
@@ -896,7 +896,7 @@ export function TutorClient({ courses, sessions }: { courses: Course[]; sessions
                   onKeyDown={handleKeyDown}
                   placeholder={`Ask about ${activeCourse.name}…`}
                   rows={1}
-                  className="flex-1 resize-none bg-transparent text-[15px] text-foreground placeholder:text-muted-foreground focus:outline-none self-center leading-relaxed overflow-y-auto"
+                  className="flex-1 resize-none bg-transparent text-[15px] text-foreground placeholder:text-muted-foreground focus:outline-none self-center leading-relaxed overflow-y-auto overscroll-contain"
                   style={{ maxHeight: 160 }}
                 />
 
