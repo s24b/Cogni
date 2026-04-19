@@ -228,8 +228,18 @@ function AssistantMessage({ content, streaming }: { content: string; streaming?:
     return <CircleNotch size={14} className="animate-spin text-muted-foreground" />
   }
 
+  const fadeMask = streaming
+    ? {
+        maskImage: 'linear-gradient(to bottom, black calc(100% - 1.5em), rgba(0,0,0,0.25) 100%)',
+        WebkitMaskImage: 'linear-gradient(to bottom, black calc(100% - 1.5em), rgba(0,0,0,0.25) 100%)',
+      }
+    : undefined
+
   return (
-    <div className="prose prose-sm dark:prose-invert max-w-none text-foreground prose-headings:font-semibold prose-headings:text-foreground prose-p:leading-relaxed prose-li:leading-relaxed prose-code:rounded prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:text-[0.8em] prose-code:font-mono prose-code:text-foreground prose-pre:bg-transparent prose-pre:p-0 prose-strong:text-foreground prose-a:text-primary">
+    <div
+      style={fadeMask}
+      className="prose prose-sm dark:prose-invert max-w-none text-foreground prose-headings:font-semibold prose-headings:text-foreground prose-p:leading-relaxed prose-li:leading-relaxed prose-code:rounded prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:text-[0.8em] prose-code:font-mono prose-code:text-foreground prose-pre:bg-transparent prose-pre:p-0 prose-strong:text-foreground prose-a:text-primary"
+    >
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}
@@ -322,16 +332,17 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [showOptions])
 
-  // Auto-grow textarea
-  function adjustTextareaHeight() {
-    const el = textareaRef.current
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = Math.min(el.scrollHeight, 160) + 'px'
-  }
+  // Auto-grow textarea (state-driven so CSS transitions fire smoothly)
+  const [taHeight, setTaHeight] = useState(48)
 
   useEffect(() => {
-    adjustTextareaHeight()
+    const el = textareaRef.current
+    if (!el) return
+    const prev = el.style.height
+    el.style.height = 'auto'
+    const h = Math.min(Math.max(el.scrollHeight, 48), 160)
+    el.style.height = prev
+    setTaHeight(h)
   }, [input])
 
   async function handleFiles(files: FileList) {
@@ -431,7 +442,7 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
     const sentAttachments = [...attachments]
     setInput('')
     setAttachments([])
-    if (textareaRef.current) textareaRef.current.style.height = 'auto'
+    setTaHeight(48)
     setSending(true)
 
     const userMsg: Message = { role: 'user', content: text, attachments: sentAttachments }
@@ -596,7 +607,17 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key !== 'Enter') return
+    if (e.metaKey || e.ctrlKey) {
+      e.preventDefault()
+      const el = e.currentTarget
+      const start = el.selectionStart
+      const end = el.selectionEnd
+      setInput(prev => prev.slice(0, start) + '\n' + prev.slice(end))
+      requestAnimationFrame(() => {
+        el.selectionStart = el.selectionEnd = start + 1
+      })
+    } else if (!e.shiftKey) {
       e.preventDefault()
       sendMessage()
     }
@@ -730,9 +751,9 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
             {messages.map((msg, i) => (
               <motion.div
                 key={i}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.2, ease }}
+                initial={{ opacity: 0, y: 14, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                transition={{ type: 'spring', stiffness: 280, damping: 28, mass: 0.9 }}
                 className={`flex flex-col ${
                   msg.role === 'user' ? 'items-end' : msg.role === 'system' ? 'items-center' : 'items-start'
                 }`}
@@ -907,7 +928,11 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
                     multiple
                     accept="image/*,.txt,.md,.py,.js,.ts,.json,.csv,.html,.css"
                     className="hidden"
-                    onChange={e => e.target.files && handleFiles(e.target.files)}
+                    onChange={async e => {
+                      const files = e.target.files
+                      if (files && files.length > 0) await handleFiles(files)
+                      e.target.value = ''
+                    }}
                   />
                   <button
                     onClick={() => fileInputRef.current?.click()}
@@ -925,7 +950,10 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
                   placeholder={`Ask about ${activeCourse.name}…`}
                   rows={1}
                   className="flex-1 resize-none bg-transparent text-[15px] text-foreground placeholder:text-muted-foreground focus:outline-none self-center leading-relaxed overflow-y-auto overscroll-contain"
-                  style={{ maxHeight: 160 }}
+                  style={{
+                    height: taHeight,
+                    transition: 'height 160ms cubic-bezier(0.22, 1, 0.36, 1)',
+                  }}
                 />
 
                 <div className="flex items-center gap-1 shrink-0">
