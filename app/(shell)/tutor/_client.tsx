@@ -587,7 +587,7 @@ export function TutorClient({ courses, sessions }: { courses: Course[]; sessions
   // ── Course picker ─────────────────────────────────────────────────────────
   if (!activeCourse) {
     return (
-      <div className="flex flex-1 flex-col gap-6 overflow-y-auto overscroll-contain p-6">
+      <div className="flex flex-1 flex-col gap-6 overflow-y-auto overscroll-contain min-h-0 p-6">
         <div>
           <h1 className="font-heading text-2xl font-semibold text-foreground">Tutor</h1>
           <p className="mt-1 text-sm text-muted-foreground">Pick a course to start a session.</p>
@@ -652,7 +652,7 @@ export function TutorClient({ courses, sessions }: { courses: Course[]; sessions
     <div className="flex h-full overflow-hidden">
       {/* Chat panel */}
       <motion.div
-        className="flex min-h-0 flex-col overflow-hidden"
+        className="flex h-full min-h-0 flex-col overflow-hidden"
         animate={{ width: splitExpanded ? '38%' : '100%' }}
         transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
         style={{ minWidth: 0 }}
@@ -685,7 +685,7 @@ export function TutorClient({ courses, sessions }: { courses: Course[]; sessions
         </div>
 
         {/* Messages */}
-        <div className="flex flex-1 flex-col gap-6 overflow-y-auto overscroll-contain px-10 py-6">
+        <div className="flex flex-1 flex-col gap-6 overflow-y-auto overscroll-contain min-h-0 px-10 py-6">
           {messages.length === 0 && (
             <motion.div
               initial={{ opacity: 0, y: 8 }}

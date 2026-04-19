@@ -173,6 +173,16 @@
     height: 100%;
     overscroll-behavior: none;
   }
+
+  /* Prevent flexbox min-h-0 bug: any scroll container must be able to shrink
+     below its content size inside a flex parent. Without this, flex-1
+     children grow to content size and break overflow-y-auto. */
+  .overflow-y-auto,
+  .overflow-auto,
+  .overflow-y-scroll {
+    min-height: 0;
+    overscroll-behavior: contain;
+  }
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
