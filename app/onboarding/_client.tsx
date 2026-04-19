@@ -361,7 +361,7 @@ export default function OnboardingClient({ googleName }: { googleName: string })
       <div className="flex flex-1 flex-col">
 
         {/* Mobile-only logo header */}
-        <div className="flex items-center px-6 pt-8 md:hidden">
+        <div className="flex items-center justify-end px-6 pt-8 md:hidden">
           <Image src="/logo.svg" alt="Cogni" width={96} height={33} priority />
         </div>
 
