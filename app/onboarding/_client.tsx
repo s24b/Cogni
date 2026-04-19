@@ -318,99 +318,98 @@ export default function OnboardingClient({ googleName }: { googleName: string })
   // ── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-between bg-background px-4 py-10">
-      {/* Logo */}
-      <div className="flex w-full max-w-lg items-center">
-        <Image src="/logo.svg" alt="Cogni" width={28} height={28} priority />
-      </div>
+    <div className="flex min-h-screen bg-background">
 
-      {/* Step content */}
-      <div className="w-full max-w-lg flex-1 py-8">
-        <AnimatePresence mode="wait" custom={direction}>
-          {step === 6 ? (
-            <motion.div
-              key="loading"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="flex flex-col items-center justify-center gap-6 py-20 text-center"
-            >
-              <motion.div
-                animate={{ rotate: 360 }}
-                transition={{ duration: 1.2, repeat: Infinity, ease: 'linear' }}
-                className="h-10 w-10 rounded-full border-2 border-border border-t-primary"
-              />
-              <div>
-                <h2 className="font-heading text-xl font-bold text-foreground">
-                  Cogni is getting to know your courses.
-                </h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  This only takes a moment.
-                </p>
-              </div>
-            </motion.div>
-          ) : (
-            <motion.div
-              key={step}
-              initial={{ x: direction > 0 ? 40 : -40, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              exit={{ x: direction > 0 ? -40 : 40, opacity: 0 }}
-              transition={SLIDE_TRANSITION}
-              className="flex flex-col"
-            >
-              <StepIcon step={step} />
+      {/* ── Left: form panel ─────────────────────────────────────────────── */}
+      <div className="flex flex-1 flex-col">
 
-              {step === 0 && (
-                <StepName name={name} setName={setName} />
-              )}
-              {step === 1 && (
-                <StepApiKey apiKey={apiKey} setApiKey={setApiKey} />
-              )}
-              {step === 2 && (
-                <StepSessionLength
-                  value={sessionLength}
-                  onChange={setSessionLength}
-                />
-              )}
-              {step === 3 && (
-                <StepCourses
-                  courses={courses}
-                  setCourses={setCourses}
-                  professorSuggestions={professorSuggestions}
-                  onProfessorNameChange={handleProfessorNameChange}
-                  onChooseProfessor={chooseProfessor}
-                />
-              )}
-              {step === 4 && (
-                <StepSyllabuses
-                  courses={courses}
-                  syllabuses={syllabuses}
-                  setSyllabuses={setSyllabuses}
-                />
-              )}
-              {step === 5 && <StepCalendar />}
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+        {/* Mobile-only logo header */}
+        <div className="flex items-center gap-2 px-6 pt-8 md:hidden">
+          <Image src="/logo.svg" alt="Cogni" width={28} height={28} priority />
+          <span className="font-heading text-base font-bold text-foreground">Cogni</span>
+        </div>
 
-      {/* Navigation + progress dots */}
-      {step < 6 && (
-        <div className="flex w-full max-w-lg flex-col gap-6">
-          {/* Dots */}
-          <div className="flex items-center justify-center gap-1.5">
-            {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
-              <div
-                key={i}
-                className={`h-1.5 rounded-full transition-all duration-300 ${
-                  i === step
-                    ? 'w-5 bg-primary'
-                    : i < step
-                    ? 'w-1.5 bg-primary/40'
-                    : 'w-1.5 bg-border'
-                }`}
-              />
-            ))}
-          </div>
+        {/* Scrollable content area */}
+        <div className="flex flex-1 flex-col items-center justify-between px-6 py-8 md:justify-center md:py-16">
+          <div className="w-full max-w-md">
+
+            <AnimatePresence mode="wait">
+              {step === 6 ? (
+                <motion.div
+                  key="loading"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="flex flex-col items-center justify-center gap-6 py-20 text-center"
+                >
+                  <motion.div
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 1.2, repeat: Infinity, ease: 'linear' }}
+                    className="h-10 w-10 rounded-full border-2 border-border border-t-primary"
+                  />
+                  <div>
+                    <h2 className="font-heading text-xl font-bold text-foreground md:text-2xl">
+                      Cogni is getting to know your courses.
+                    </h2>
+                    <p className="mt-2 text-sm text-muted-foreground md:text-base">
+                      This only takes a moment.
+                    </p>
+                  </div>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key={step}
+                  initial={{ x: direction > 0 ? 40 : -40, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  exit={{ x: direction > 0 ? -40 : 40, opacity: 0 }}
+                  transition={SLIDE_TRANSITION}
+                  className="flex flex-col"
+                >
+                  <StepIcon step={step} />
+
+                  {step === 0 && <StepName name={name} setName={setName} />}
+                  {step === 1 && <StepApiKey apiKey={apiKey} setApiKey={setApiKey} />}
+                  {step === 2 && (
+                    <StepSessionLength value={sessionLength} onChange={setSessionLength} />
+                  )}
+                  {step === 3 && (
+                    <StepCourses
+                      courses={courses}
+                      setCourses={setCourses}
+                      professorSuggestions={professorSuggestions}
+                      onProfessorNameChange={handleProfessorNameChange}
+                      onChooseProfessor={chooseProfessor}
+                    />
+                  )}
+                  {step === 4 && (
+                    <StepSyllabuses
+                      courses={courses}
+                      syllabuses={syllabuses}
+                      setSyllabuses={setSyllabuses}
+                    />
+                  )}
+                  {step === 5 && <StepCalendar />}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Navigation + dots — only when not loading */}
+            {step < 6 && (
+              <div className="mt-10 flex flex-col gap-5">
+                {/* Progress dots */}
+                <div className="flex items-center justify-center gap-1.5">
+                  {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
+                    <div
+                      key={i}
+                      className={`h-1.5 rounded-full transition-all duration-300 ${
+                        i === step
+                          ? 'w-5 bg-primary'
+                          : i < step
+                          ? 'w-1.5 bg-primary/40'
+                          : 'w-1.5 bg-border'
+                      }`}
+                    />
+                  ))}
+                </div>
 
           {/* Buttons */}
           <div className="flex items-center gap-3">
@@ -453,17 +452,60 @@ export default function OnboardingClient({ googleName }: { googleName: string })
             </Button>
           </div>
 
-          {/* Skip — steps 4 and 5 */}
-          {(step === 4 || step === 5) && (
-            <button
-              onClick={advance}
-              className="text-center text-sm text-muted-foreground underline-offset-4 hover:underline"
-            >
-              Skip for now
-            </button>
-          )}
+                {/* Skip — steps 4 and 5 */}
+                {(step === 4 || step === 5) && (
+                  <button
+                    onClick={advance}
+                    className="text-center text-sm text-muted-foreground underline-offset-4 hover:underline"
+                  >
+                    Skip for now
+                  </button>
+                )}
+              </div>
+            )}
+
+          </div>
         </div>
-      )}
+      </div>
+
+      {/* ── Right: branded panel (desktop only) ──────────────────────────── */}
+      <div className="hidden md:flex md:w-[420px] lg:w-[480px] shrink-0 flex-col items-center justify-center gap-8 bg-primary px-12 py-16 relative overflow-hidden">
+        {/* Decorative circles */}
+        <div className="absolute -top-24 -right-24 h-72 w-72 rounded-full bg-white/5" />
+        <div className="absolute -bottom-32 -left-20 h-96 w-96 rounded-full bg-white/5" />
+        <div className="absolute top-1/3 right-8 h-40 w-40 rounded-full bg-white/5" />
+
+        <div className="relative flex flex-col items-center gap-6 text-center">
+          <Image
+            src="/logo.svg"
+            alt="Cogni"
+            width={80}
+            height={80}
+            priority
+            className="brightness-0 invert"
+          />
+          <div>
+            <p className="font-heading text-3xl font-bold text-white lg:text-4xl">Cogni</p>
+            <p className="mt-2 text-base text-white/70 lg:text-lg">
+              Your personal AI study system.
+            </p>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-3 text-left">
+            {[
+              'Learns how your professors test',
+              'Builds your study plan automatically',
+              'Adapts as your mastery grows',
+            ].map(line => (
+              <div key={line} className="flex items-center gap-3 text-sm text-white/80 lg:text-base">
+                <div className="h-1.5 w-1.5 shrink-0 rounded-full bg-white/60" />
+                {line}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
     </div>
   )
 }
@@ -502,10 +544,10 @@ function StepName({
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-heading text-2xl font-bold text-foreground">
+        <h1 className="font-heading text-2xl font-bold text-foreground md:text-3xl">
           What should we call you?
         </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <p className="mt-1 text-sm text-muted-foreground md:text-base">
           This is how Cogni will address you.
         </p>
       </div>
@@ -533,10 +575,10 @@ function StepApiKey({
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-heading text-2xl font-bold text-foreground">
+        <h1 className="font-heading text-2xl font-bold text-foreground md:text-3xl">
           You&apos;ll need an API key.
         </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <p className="mt-1 text-sm text-muted-foreground md:text-base">
           Cogni uses AI to think. Your key is encrypted and never shared.
           Anthropic or OpenAI keys both work.
         </p>
@@ -576,10 +618,10 @@ function StepSessionLength({
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-heading text-2xl font-bold text-foreground">
+        <h1 className="font-heading text-2xl font-bold text-foreground md:text-3xl">
           How long do you like to study?
         </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <p className="mt-1 text-sm text-muted-foreground md:text-base">
           Cogni will cap each session block at this length.
         </p>
       </div>
@@ -632,10 +674,10 @@ function StepCourses({
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-heading text-2xl font-bold text-foreground">
+        <h1 className="font-heading text-2xl font-bold text-foreground md:text-3xl">
           What courses are you taking?
         </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <p className="mt-1 text-sm text-muted-foreground md:text-base">
           Add your courses and professors for this semester.
         </p>
       </div>
@@ -741,10 +783,10 @@ function StepSyllabuses({
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-heading text-2xl font-bold text-foreground">
+        <h1 className="font-heading text-2xl font-bold text-foreground md:text-3xl">
           Drop your syllabuses here.
         </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <p className="mt-1 text-sm text-muted-foreground md:text-base">
           Cogni reads them to build your study plan. You can skip any course and add them later.
         </p>
       </div>
@@ -770,10 +812,10 @@ function StepCalendar() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-heading text-2xl font-bold text-foreground">
+        <h1 className="font-heading text-2xl font-bold text-foreground md:text-3xl">
           Connect your calendar.
         </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <p className="mt-1 text-sm text-muted-foreground md:text-base">
           Cogni schedules study blocks around your existing events. You can connect later in Settings.
         </p>
       </div>

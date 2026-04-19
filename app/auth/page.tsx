@@ -56,16 +56,18 @@ export default function AuthPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+    <div className="flex min-h-screen bg-background">
+      {/* Form panel */}
+      <div className="flex flex-1 flex-col items-center justify-center p-6 sm:p-10">
       <div className="w-full max-w-sm space-y-8">
         {/* Logo */}
         <div className="flex flex-col items-center gap-3">
-          <Image src="/logo.svg" alt="Cogni" width={48} height={48} priority />
+          <Image src="/logo.svg" alt="Cogni" width={52} height={52} priority />
           <div className="text-center">
-            <h1 className="text-2xl font-heading font-bold text-foreground">
+            <h1 className="text-2xl font-heading font-bold text-foreground md:text-3xl">
               Sign in to Cogni
             </h1>
-            <p className="text-sm text-muted-foreground mt-1">
+            <p className="text-sm text-muted-foreground mt-1 md:text-base">
               Your personal AI study system
             </p>
           </div>
@@ -168,6 +170,42 @@ export default function AuthPage() {
             </>
           )}
         </p>
+      </div>
+      </div>
+
+      {/* Branded panel — desktop only */}
+      <div className="hidden md:flex md:w-[420px] lg:w-[480px] shrink-0 flex-col items-center justify-center gap-8 bg-primary px-12 py-16 relative overflow-hidden">
+        <div className="absolute -top-24 -right-24 h-72 w-72 rounded-full bg-white/5" />
+        <div className="absolute -bottom-32 -left-20 h-96 w-96 rounded-full bg-white/5" />
+        <div className="absolute top-1/3 right-8 h-40 w-40 rounded-full bg-white/5" />
+        <div className="relative flex flex-col items-center gap-6 text-center">
+          <Image
+            src="/logo.svg"
+            alt="Cogni"
+            width={80}
+            height={80}
+            priority
+            className="brightness-0 invert"
+          />
+          <div>
+            <p className="font-heading text-3xl font-bold text-white lg:text-4xl">Cogni</p>
+            <p className="mt-2 text-base text-white/70 lg:text-lg">
+              Your personal AI study system.
+            </p>
+          </div>
+          <div className="mt-4 flex flex-col gap-3 text-left">
+            {[
+              'Learns how your professors test',
+              'Builds your study plan automatically',
+              'Adapts as your mastery grows',
+            ].map(line => (
+              <div key={line} className="flex items-center gap-3 text-sm text-white/80 lg:text-base">
+                <div className="h-1.5 w-1.5 shrink-0 rounded-full bg-white/60" />
+                {line}
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   )
