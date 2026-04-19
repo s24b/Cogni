@@ -1,4 +1,5 @@
 import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { initWiki } from '@/lib/wiki'
 import { NextResponse } from 'next/server'
 
 type CourseInput = {
@@ -86,6 +87,8 @@ export async function POST(request: Request) {
       processing_status: 'pending',
     })
   }
+
+  await initWiki(user.id)
 
   return NextResponse.json({ ok: true })
 }
