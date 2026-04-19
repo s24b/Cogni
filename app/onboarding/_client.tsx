@@ -112,11 +112,30 @@ function StepIcon({ step }: { step: number }) {
       key={step}
       initial={{ scale: 0.6, opacity: 0 }}
       animate={{ scale: 1, opacity: 1, transition: { duration: 0.3, ease: 'easeOut' } }}
-      className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10"
+      className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 md:self-center"
     >
       <Icon className="h-7 w-7 text-primary" strokeWidth={1.5} />
     </motion.div>
   )
+}
+
+const STORAGE_KEY = 'cogni_onboarding_v1'
+
+type SavedState = {
+  step: number
+  name: string
+  sessionLength: 25 | 45 | 90
+  courses: CourseEntry[]
+  apiKeySubmitted: boolean
+}
+
+function loadSaved(): SavedState | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -125,30 +144,42 @@ export default function OnboardingClient({ googleName }: { googleName: string })
   const router = useRouter()
   const supabase = createClient()
 
-  const [step, setStep] = useState<Step>(0)
+  const saved = typeof window !== 'undefined' ? loadSaved() : null
+
+  const [step, setStep] = useState<Step>((saved?.step ?? 0) as Step)
   const [direction, setDirection] = useState(1)
   const [loading, setLoading] = useState(false)
 
   // Step 0 — Name
-  const [name, setName] = useState(googleName)
+  const [name, setName] = useState(saved?.name ?? googleName)
 
   // Step 1 — API Key
   const [apiKey, setApiKey] = useState('')
+  const [apiKeySubmitted, setApiKeySubmitted] = useState(saved?.apiKeySubmitted ?? false)
 
   // Step 2 — Session Length
-  const [sessionLength, setSessionLength] = useState<25 | 45 | 90>(45)
+  const [sessionLength, setSessionLength] = useState<25 | 45 | 90>(saved?.sessionLength ?? 45)
 
   // Step 3 — Courses
-  const [courses, setCourses] = useState<CourseEntry[]>([
-    { id: crypto.randomUUID(), name: '', professorName: '', existingProfessor: null },
-  ])
+  const [courses, setCourses] = useState<CourseEntry[]>(
+    saved?.courses?.length
+      ? saved.courses
+      : [{ id: crypto.randomUUID(), name: '', professorName: '', existingProfessor: null }],
+  )
   const [professorSuggestions, setProfessorSuggestions] = useState<
     Record<string, { professor_id: string; name: string }[]>
   >({})
   const debounceRefs = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
-  // Step 4 — Syllabuses
+  // Step 4 — Syllabuses (files can't be persisted — entries are recreated from courses)
   const [syllabuses, setSyllabuses] = useState<SyllabusEntry[]>([])
+
+  // Persist progress to localStorage whenever key state changes
+  useEffect(() => {
+    if (step >= 6) return
+    const state: SavedState = { step, name, sessionLength, courses, apiKeySubmitted }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+  }, [step, name, sessionLength, courses, apiKeySubmitted])
 
   // Sync syllabuses when courses change
   useEffect(() => {
@@ -184,6 +215,11 @@ export default function OnboardingClient({ googleName }: { googleName: string })
   }
 
   async function handleContinueApiKey() {
+    // If key was already submitted in a previous session, skip the API call
+    if (apiKeySubmitted) {
+      advance()
+      return
+    }
     const trimmed = apiKey.trim()
     if (!trimmed.startsWith('sk-') || trimmed.length < 20) {
       toast.error('Enter a valid API key (starts with "sk-").')
@@ -201,6 +237,7 @@ export default function OnboardingClient({ googleName }: { googleName: string })
       toast.error(data.error ?? 'Failed to save key.')
       return
     }
+    setApiKeySubmitted(true)
     advance()
   }
 
@@ -303,7 +340,7 @@ export default function OnboardingClient({ googleName }: { googleName: string })
       return
     }
 
-    // Brief pause so the loading screen shows
+    localStorage.removeItem(STORAGE_KEY)
     await new Promise(r => setTimeout(r, 1200))
     router.push('/today')
   }
@@ -325,7 +362,7 @@ export default function OnboardingClient({ googleName }: { googleName: string })
 
         {/* Mobile-only logo header */}
         <div className="flex items-center px-6 pt-8 md:hidden">
-          <Image src="/logo.svg" alt="Cogni" width={120} height={41} priority />
+          <Image src="/logo.svg" alt="Cogni" width={96} height={33} priority />
         </div>
 
         {/* Scrollable content area */}
@@ -366,7 +403,7 @@ export default function OnboardingClient({ googleName }: { googleName: string })
                   <StepIcon step={step} />
 
                   {step === 0 && <StepName name={name} setName={setName} />}
-                  {step === 1 && <StepApiKey apiKey={apiKey} setApiKey={setApiKey} />}
+                  {step === 1 && <StepApiKey apiKey={apiKey} setApiKey={setApiKey} alreadySubmitted={apiKeySubmitted} />}
                   {step === 2 && (
                     <StepSessionLength value={sessionLength} onChange={setSessionLength} />
                   )}
@@ -563,9 +600,11 @@ function StepName({
 function StepApiKey({
   apiKey,
   setApiKey,
+  alreadySubmitted,
 }: {
   apiKey: string
   setApiKey: (v: string) => void
+  alreadySubmitted: boolean
 }) {
   return (
     <div className="space-y-6">
@@ -578,6 +617,12 @@ function StepApiKey({
           Anthropic or OpenAI keys both work.
         </p>
       </div>
+      {alreadySubmitted ? (
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-3 text-sm text-muted-foreground">
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
+          API key already saved — you&apos;re good to continue.
+        </div>
+      ) : (
       <div className="space-y-2">
         <Label htmlFor="api-key">API key</Label>
         <Input
@@ -593,6 +638,7 @@ function StepApiKey({
           Get an Anthropic key at console.anthropic.com
         </p>
       </div>
+      )}
     </div>
   )
 }
