@@ -272,13 +272,8 @@ export function TodayClient({
       {tasks.length === 0 && missingSyllabus.length === 0 && hasApiKey && (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 py-16 text-center">
           <BookOpen size={36} className="text-muted-foreground/40" />
-          <p className="text-sm text-muted-foreground">No tasks for today. Upload a syllabus to get started.</p>
-          <Link
-            href="/inbox"
-            className="mt-1 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
-          >
-            Go to Inbox
-          </Link>
+          <p className="text-sm text-muted-foreground">You&apos;re all caught up for today.</p>
+          <p className="text-xs text-muted-foreground/60">New cards and assignments will appear here when they&apos;re due.</p>
         </div>
       )}
     </div>

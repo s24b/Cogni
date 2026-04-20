@@ -14,11 +14,11 @@ BEGIN
     RETURN;
   END IF;
 
-  -- Find the Calculus AB course
+  -- Find the Calculus AB course (matches "calc", "calculus", "AP Calculus", etc.)
   SELECT course_id INTO v_course_id
   FROM public.courses
   WHERE user_id = v_user_id
-    AND name ILIKE '%calculus%'
+    AND name ILIKE '%cal%'
   LIMIT 1;
 
   IF v_course_id IS NULL THEN
