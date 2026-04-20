@@ -14,6 +14,8 @@ import {
   Timer,
   Trophy,
   ClipboardText,
+  MagnifyingGlass,
+  X,
 } from '@phosphor-icons/react'
 import { ease } from '@/components/ui/motion'
 import type { QuizQuestion, GradeSummary } from '@/lib/agents/practice-quiz'
@@ -25,7 +27,7 @@ type Difficulty = 'easy' | 'medium' | 'hard'
 type CheckTiming = 'after_each' | 'at_end'
 
 type ConfigState = {
-  topicFilter: string
+  topicFilters: string[]   // empty = all topics
   format: QuizFormat
   questionCount: number
   difficulty: Difficulty
@@ -121,6 +123,110 @@ function CountdownTimer({ totalSeconds, onExpire }: { totalSeconds: number; onEx
   )
 }
 
+// ── Topic search + multi-select ───────────────────────────────────────────────
+
+function TopicPicker({
+  options,
+  selected,
+  onChange,
+}: {
+  options: string[]
+  selected: string[]
+  onChange: (next: string[]) => void
+}) {
+  const [search, setSearch] = useState('')
+
+  const filtered = options.filter(t =>
+    t.toLowerCase().includes(search.toLowerCase())
+  )
+
+  function toggle(t: string) {
+    onChange(selected.includes(t) ? selected.filter(s => s !== t) : [...selected, t])
+  }
+
+  function remove(t: string) {
+    onChange(selected.filter(s => s !== t))
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      {/* Search input */}
+      <div className="relative">
+        <MagnifyingGlass size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <input
+          type="text"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search topics…"
+          className="w-full rounded-lg border border-border bg-background py-2 pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/40"
+        />
+        {search && (
+          <button
+            onClick={() => setSearch('')}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          >
+            <X size={13} />
+          </button>
+        )}
+      </div>
+
+      {/* Selected chips */}
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {selected.map(t => (
+            <span
+              key={t}
+              className="flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary"
+            >
+              {t}
+              <button onClick={() => remove(t)} className="hover:text-primary/70 transition-colors">
+                <X size={11} weight="bold" />
+              </button>
+            </span>
+          ))}
+          <button
+            onClick={() => onChange([])}
+            className="rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Clear all
+          </button>
+        </div>
+      )}
+
+      {/* Scrollable list */}
+      <div className="max-h-44 overflow-y-auto rounded-xl border border-border divide-y divide-border">
+        {filtered.length === 0 ? (
+          <p className="px-3 py-3 text-xs text-muted-foreground">No topics match &ldquo;{search}&rdquo;</p>
+        ) : (
+          filtered.map(t => {
+            const checked = selected.includes(t)
+            return (
+              <button
+                key={t}
+                onClick={() => toggle(t)}
+                className={`flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm transition-colors hover:bg-muted/30 ${checked ? 'text-foreground' : 'text-muted-foreground'}`}
+              >
+                <span className={`flex size-4 shrink-0 items-center justify-center rounded border transition-colors ${checked ? 'border-primary bg-primary' : 'border-border'}`}>
+                  {checked && <CheckCircle size={11} className="text-primary-foreground" weight="fill" />}
+                </span>
+                <span className="flex-1 truncate">{t}</span>
+              </button>
+            )
+          })
+        )}
+      </div>
+
+      {/* Status line */}
+      <p className="text-xs text-muted-foreground">
+        {selected.length === 0
+          ? 'All topics — weighted toward your weakest areas'
+          : `${selected.length} topic${selected.length > 1 ? 's' : ''} selected`
+        }
+      </p>
+    </div>
+  )
+}
+
 // ── Config form ────────────────────────────────────────────────────────────────
 
 function ConfigForm({
@@ -138,7 +244,7 @@ function ConfigForm({
   loading: boolean
   examMode?: boolean
 }) {
-  const [topicFilter, setTopicFilter] = useState('')
+  const [topicFilters, setTopicFilters] = useState<string[]>([])
   const [format, setFormat] = useState<QuizFormat>('mc')
   const [questionCount, setQuestionCount] = useState(10)
   const [difficulty, setDifficulty] = useState<Difficulty>('medium')
@@ -186,40 +292,22 @@ function ConfigForm({
 
         {!examMode && (
           <>
-            {/* Topic */}
+            {/* Topic picker */}
             <div className="flex flex-col gap-2">
-              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Topic</label>
+              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Topics <span className="normal-case font-normal">(optional — select one or more)</span>
+              </label>
               {topicOptions && topicOptions.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5">
-                  <button
-                    onClick={() => setTopicFilter('')}
-                    className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                      topicFilter === ''
-                        ? 'border-primary bg-primary/10 text-primary'
-                        : 'border-border text-muted-foreground hover:border-primary/40'
-                    }`}
-                  >
-                    All Topics
-                  </button>
-                  {topicOptions.map(t => (
-                    <button
-                      key={t}
-                      onClick={() => setTopicFilter(prev => prev === t ? '' : t)}
-                      className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                        topicFilter === t
-                          ? 'border-primary bg-primary/10 text-primary'
-                          : 'border-border text-muted-foreground hover:border-primary/40'
-                      }`}
-                    >
-                      {t}
-                    </button>
-                  ))}
-                </div>
+                <TopicPicker
+                  options={topicOptions}
+                  selected={topicFilters}
+                  onChange={setTopicFilters}
+                />
               ) : (
                 <input
                   type="text"
-                  value={topicFilter}
-                  onChange={e => setTopicFilter(e.target.value)}
+                  value={topicFilters[0] ?? ''}
+                  onChange={e => setTopicFilters(e.target.value ? [e.target.value] : [])}
                   placeholder="e.g. Derivatives, Integration… (leave blank for all)"
                   className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/40"
                 />
@@ -319,7 +407,7 @@ function ConfigForm({
         )}
 
         <button
-          onClick={() => onStart({ topicFilter, format, questionCount, difficulty, checkTiming })}
+          onClick={() => onStart({ topicFilters, format, questionCount, difficulty, checkTiming })}
           disabled={loading}
           className="flex items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
         >
@@ -634,7 +722,7 @@ export function QuizSession({ courseId, courseName, topicOptions, initialQuestio
   const [userAnswers, setUserAnswers] = useState<string[]>([])
   const [summary, setSummary] = useState<GradeSummary | null>(null)
   const [configState, setConfigState] = useState<ConfigState>({
-    topicFilter: '', format: 'mc', questionCount: 10, difficulty: 'medium', checkTiming: 'after_each',
+    topicFilters: [], format: 'mc', questionCount: 10, difficulty: 'medium', checkTiming: 'after_each',
   })
   const [examDuration, setExamDuration] = useState(0)
   const [startTime, setStartTime] = useState<number>(0)
@@ -645,6 +733,9 @@ export function QuizSession({ courseId, courseName, topicOptions, initialQuestio
     setPhase('grading')
     try {
       const durationSeconds = startTime ? Math.round((Date.now() - startTime) / 1000) : undefined
+      const topicLabel = configState.topicFilters.length > 0
+        ? configState.topicFilters.join(', ')
+        : undefined
       const res = await fetch('/api/agents/practice-quiz/grade', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -653,8 +744,9 @@ export function QuizSession({ courseId, courseName, topicOptions, initialQuestio
           testType: examMode ? 'simulated_exam' : 'practice_quiz',
           questions: qs,
           userAnswers: answers,
-          topicFilter: configState.topicFilter || undefined,
+          topicFilter: topicLabel,
           durationSeconds,
+          inSession: !!normalizedInitial,  // 30/70 blend for tutor-generated quizzes
         }),
       })
       const data = await res.json() as GradeSummary
@@ -665,7 +757,7 @@ export function QuizSession({ courseId, courseName, topicOptions, initialQuestio
       setSummary({ correctCount: 0, scorePct: 0, missedTopics: [], masteryUpdates: [] })
       setPhase('results')
     }
-  }, [courseId, examMode, configState.topicFilter, startTime, onComplete])
+  }, [courseId, examMode, configState.topicFilters, startTime, onComplete])
 
   onExpireRef.current = () => submitAnswers(userAnswers, questions)
 
@@ -674,6 +766,9 @@ export function QuizSession({ courseId, courseName, topicOptions, initialQuestio
     setLoadingConfig(true)
 
     try {
+      const topicFilter = cfg.topicFilters.length > 0
+        ? cfg.topicFilters.join(', ')
+        : undefined
       const endpoint = examMode ? '/api/agents/simulated-exam' : '/api/agents/practice-quiz'
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -683,7 +778,7 @@ export function QuizSession({ courseId, courseName, topicOptions, initialQuestio
           courseName,
           format: cfg.format,
           questionCount: cfg.questionCount,
-          topicFilter: cfg.topicFilter || undefined,
+          topicFilter,
           difficulty: cfg.difficulty,
         }),
       })

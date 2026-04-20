@@ -225,6 +225,7 @@ export async function gradeAndRecord(
   topicFilter?: string,
   durationSeconds?: number,
   apiKey?: string,
+  masteryWeight = 0.6,     // 0.6 for standalone, 0.3 for in-session (tutor) quizzes
 ): Promise<GradeSummary> {
   const service = createServiceClient()
 
@@ -314,8 +315,8 @@ Return JSON only: {"score": 0.0-1.0, "correct": true/false, "feedback": "one sen
       .single()
 
     const oldScore = Number(existing?.mastery_score ?? 0)
-    // Blend with existing: 60% new, 40% old
-    const blended = existing ? oldScore * 0.4 + newScore * 0.6 : newScore
+    // Blend: masteryWeight controls how much the new score counts
+    const blended = existing ? oldScore * (1 - masteryWeight) + newScore * masteryWeight : newScore
 
     await service.from('topic_mastery').upsert({
       user_id: userId,

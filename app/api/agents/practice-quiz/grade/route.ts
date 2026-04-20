@@ -11,8 +11,9 @@ export async function POST(request: Request) {
     userAnswers: string[]
     topicFilter?: string
     durationSeconds?: number
+    inSession?: boolean   // true for tutor-generated quizzes → lighter mastery weight
   }
-  const { courseId, testType, questions, userAnswers, topicFilter, durationSeconds } = body
+  const { courseId, testType, questions, userAnswers, topicFilter, durationSeconds, inSession } = body
 
   if (!courseId || !questions?.length) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
@@ -34,6 +35,7 @@ export async function POST(request: Request) {
       topicFilter,
       durationSeconds,
       apiKey ?? undefined,
+      inSession ? 0.3 : 0.6,  // Option 2: lighter blend for in-session tutor quizzes
     )
     return NextResponse.json(summary)
   } catch (err) {
