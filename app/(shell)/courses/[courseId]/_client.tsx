@@ -11,9 +11,6 @@ import {
   CircleNotch,
   ClipboardText,
   GraduationCap,
-  CheckCircle,
-  Clock,
-  CaretRight,
 } from '@phosphor-icons/react'
 import { StaggerList, StaggerItem, ease } from '@/components/ui/motion'
 import { QuizSession } from '@/components/quiz/QuizSession'
@@ -163,12 +160,15 @@ export function CourseDetailClient({
   const router = useRouter()
   const [mode, setMode] = useState<Mode>('overview')
 
+  const topicNames = course.topics.map(t => t.name)
+
   if (mode === 'quiz') {
     return (
       <div className="flex h-full flex-col overflow-hidden">
         <QuizSession
           courseId={course.course_id}
           courseName={course.name}
+          topicOptions={topicNames}
           onClose={() => { setMode('overview'); router.refresh() }}
         />
       </div>

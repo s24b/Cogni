@@ -60,6 +60,22 @@ export async function POST(request: Request) {
     return NextResponse.json(MOCK_EXAM)
   }
 
+  // Content guard — require at least some uploaded material
+  const { createServiceClient } = await import('@/lib/supabase/server')
+  const service = createServiceClient()
+  const { data: topics } = await service
+    .from('topics')
+    .select('content_coverage')
+    .eq('course_id', courseId)
+    .gt('content_coverage', 0.05)
+    .limit(1)
+
+  if (!topics || topics.length === 0) {
+    return NextResponse.json({
+      error: 'Not enough course material to generate a realistic simulated exam. Upload your syllabus, lecture notes, or textbook chapters first.',
+    }, { status: 422 })
+  }
+
   try {
     const result = await generateSimulatedExam(user.id, courseId, courseName)
     return NextResponse.json(result)

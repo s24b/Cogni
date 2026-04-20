@@ -35,8 +35,9 @@ export async function POST(request: Request) {
     format: QuizFormat
     questionCount: number
     topicFilter?: string
+    difficulty?: 'easy' | 'medium' | 'hard'
   }
-  const { courseId, courseName, format, questionCount, topicFilter } = body
+  const { courseId, courseName, format, questionCount, topicFilter, difficulty } = body
 
   if (!courseId || !courseName) {
     return NextResponse.json({ error: 'Missing courseId or courseName' }, { status: 400 })
@@ -59,6 +60,7 @@ export async function POST(request: Request) {
       format,
       questionCount,
       topicFilter,
+      difficulty,
     )
     return NextResponse.json({ questions })
   } catch (err) {

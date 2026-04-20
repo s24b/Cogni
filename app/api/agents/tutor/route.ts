@@ -10,6 +10,7 @@ import {
   type TutorMode,
 } from '@/lib/agents/tutor'
 import { readWikiFile, writeWikiFile } from '@/lib/wiki'
+import { newCardDefaults } from '@/lib/fsrs'
 import Anthropic from '@anthropic-ai/sdk'
 import { NextResponse } from 'next/server'
 
@@ -133,7 +134,7 @@ export async function POST(request: Request) {
     { type: 'web_search_20250305', name: 'web_search' },
     {
       name: 'create_flashcards',
-      description: 'Create a set of flashcards for the student. Call this whenever the student asks to make, generate, or create flashcards or study cards on any topic.',
+      description: 'Create and save a set of flashcards for the student. Before calling, ask ONE brief question about which specific subtopic or aspect to focus on, unless the student already specified — e.g. "Any particular aspect — power rule, chain rule, trig? Or all derivatives?" Then generate based on their answer.',
       input_schema: {
         type: 'object' as const,
         properties: {
@@ -156,7 +157,7 @@ export async function POST(request: Request) {
     },
     {
       name: 'create_quiz',
-      description: 'Create a practice quiz for the student. Call this whenever the student asks to make, generate, or create a quiz, practice test, or set of questions on any topic.',
+      description: 'Create a practice quiz for the student. Before calling, ask ONE brief question: what format (MC / short answer / mix) and how many questions? Give a recommendation based on what the student was just working on — e.g. "I\'d suggest 10 mixed questions on derivatives. MC, short answer, or mixed? And how many?" Then generate immediately once they answer.',
       input_schema: {
         type: 'object' as const,
         properties: {
@@ -320,7 +321,32 @@ export async function POST(request: Request) {
               } else if (block.name === 'create_flashcards') {
                 const input = block.input as { topic: string; cards: { front: string; back: string }[] }
                 controller.enqueue(emit({ t: 'card', kind: 'flashcards', topic: input.topic, count: input.cards.length, data: input.cards }))
-                toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: `Created ${input.cards.length} flashcards on "${input.topic}". Tell the student they're ready.` })
+
+                // Save cards to flashcards table so they enter spaced repetition
+                try {
+                  const saveSvc = createServiceClient()
+                  const { data: topicRow } = await saveSvc
+                    .from('topics')
+                    .select('topic_id')
+                    .eq('course_id', courseId)
+                    .ilike('name', `%${input.topic}%`)
+                    .limit(1)
+                    .single()
+                  const defaults = newCardDefaults()
+                  await saveSvc.from('flashcards').insert(
+                    input.cards.map(card => ({
+                      user_id: user.id,
+                      course_id: courseId,
+                      topic_id: topicRow?.topic_id ?? null,
+                      front: card.front,
+                      back: card.back,
+                      hint: null,
+                      ...defaults,
+                    }))
+                  )
+                } catch { /* non-critical */ }
+
+                toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: `Created ${input.cards.length} flashcards on "${input.topic}" and saved them to the student's deck. Tell the student they're ready and have been added to spaced repetition.` })
               } else if (block.name === 'create_quiz') {
                 const input = block.input as { topic: string; questions: object[] }
                 controller.enqueue(emit({ t: 'card', kind: 'quiz', topic: input.topic, count: input.questions.length, data: input.questions }))

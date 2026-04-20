@@ -35,6 +35,7 @@ import { StaggerList, StaggerItem, ease } from '@/components/ui/motion'
 import { BorderBeam } from 'border-beam'
 import { EssayEditor, applyEdit, type AssistanceLevel, type SuggestedEdit } from '@/components/essay/EssayEditor'
 import { QuizSession, type QuizQuestion } from '@/components/quiz/QuizSession'
+import { FlashcardViewer } from '@/components/quiz/FlashcardViewer'
 import type { Editor } from '@tiptap/react'
 
 type Course = { course_id: string; name: string; professors: { name: string }[] | { name: string } | null }
@@ -1354,34 +1355,21 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
                 initialQuestions={splitContent.data as QuizQuestion[]}
                 onClose={() => setSplitExpanded(false)}
               />
+            ) : splitContent.type === 'flashcards' && splitContent.data ? (
+              <FlashcardViewer
+                cards={splitContent.data as { front: string; back: string }[]}
+                topic={splitContent.topic}
+                onClose={() => setSplitExpanded(false)}
+              />
             ) : (
-              <>
-                <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-                  <div className="flex size-7 items-center justify-center rounded-lg bg-primary/10">
-                    <Cards size={14} className="text-primary" weight="fill" />
-                  </div>
-                  <span className="flex-1 text-sm font-semibold text-foreground">
-                    {splitContent.type === 'flashcards' ? `Flashcards — ${splitContent.topic}` : `Quiz — ${splitContent.topic}`}
-                  </span>
-                  <button
-                    onClick={() => setSplitExpanded(false)}
-                    className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
-                  >
-                    <ArrowsIn size={14} />
-                  </button>
+              <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+                <div className="flex size-14 items-center justify-center rounded-2xl bg-primary/10">
+                  <Cards size={28} className="text-primary" weight="fill" />
                 </div>
-                <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
-                  <div className="flex size-14 items-center justify-center rounded-2xl bg-primary/10">
-                    <Cards size={28} className="text-primary" weight="fill" />
-                  </div>
-                  <p className="text-sm font-medium text-foreground">
-                    {splitContent.count} flashcards ready
-                  </p>
-                  <p className="max-w-xs text-xs text-muted-foreground">
-                    Review these in the Courses tab to practice with spaced repetition.
-                  </p>
-                </div>
-              </>
+                <p className="text-sm font-medium text-foreground">
+                  {splitContent.count} {splitContent.type === 'flashcards' ? 'flashcards' : 'questions'} ready
+                </p>
+              </div>
             )}
           </motion.div>
         )}

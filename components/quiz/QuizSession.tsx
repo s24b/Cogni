@@ -2,14 +2,17 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import ReactMarkdown from 'react-markdown'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
 import {
   ArrowRight,
+  ArrowLeft,
   CheckCircle,
   XCircle,
   CircleNotch,
   Timer,
   Trophy,
-  ArrowLeft,
   ClipboardText,
 } from '@phosphor-icons/react'
 import { ease } from '@/components/ui/motion'
@@ -18,25 +21,59 @@ import type { QuizQuestion, GradeSummary } from '@/lib/agents/practice-quiz'
 export type { QuizQuestion }
 
 type QuizFormat = 'mc' | 'short_answer' | 'mixed'
+type Difficulty = 'easy' | 'medium' | 'hard'
+type CheckTiming = 'after_each' | 'at_end'
 
 type ConfigState = {
   topicFilter: string
   format: QuizFormat
   questionCount: number
+  difficulty: Difficulty
+  checkTiming: CheckTiming
 }
 
-type QuizState = 'config' | 'loading' | 'quiz' | 'grading' | 'results'
+type QuizPhase = 'config' | 'loading' | 'quiz' | 'grading' | 'results'
 
 type Props = {
   courseId: string
   courseName: string
-  // Pre-loaded questions (from tutor's create_quiz). If provided, skip config.
+  topicOptions?: string[]
   initialQuestions?: QuizQuestion[]
-  examMode?: boolean         // adds countdown timer, no-pause, Sonnet-generated
+  examMode?: boolean
   onClose?: () => void
-  // Called after results are shown, if parent wants to react
   onComplete?: (summary: GradeSummary) => void
 }
+
+// ── Inline math-aware text renderer ──────────────────────────────────────────
+
+function MathText({ text, block = false }: { text: string; block?: boolean }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkMath]}
+      rehypePlugins={[rehypeKatex]}
+      components={block ? undefined : {
+        p: ({ children }) => <span>{children}</span>,
+      }}
+    >
+      {text}
+    </ReactMarkdown>
+  )
+}
+
+// ── Normalize questions from tutor (add type field if missing) ────────────────
+
+function normalizeQuestion(q: object): QuizQuestion {
+  const raw = q as Partial<QuizQuestion> & { options?: string[] }
+  return {
+    ...raw,
+    question: raw.question ?? '',
+    answer: raw.answer ?? '',
+    explanation: raw.explanation ?? '',
+    type: raw.type ?? (Array.isArray(raw.options) && raw.options.length > 0 ? 'mc' : 'short_answer'),
+  } as QuizQuestion
+}
+
+// ── Sub-components ─────────────────────────────────────────────────────────────
 
 function ProgressBar({ current, total }: { current: number; total: number }) {
   return (
@@ -74,7 +111,7 @@ function CountdownTimer({ totalSeconds, onExpire }: { totalSeconds: number; onEx
 
   const mins = Math.floor(remaining / 60)
   const secs = remaining % 60
-  const urgent = remaining < 300  // last 5 minutes
+  const urgent = remaining < 300
 
   return (
     <div className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-mono font-semibold tabular-nums ${urgent ? 'bg-red-500/10 text-red-500' : 'bg-muted text-muted-foreground'}`}>
@@ -84,20 +121,28 @@ function CountdownTimer({ totalSeconds, onExpire }: { totalSeconds: number; onEx
   )
 }
 
+// ── Config form ────────────────────────────────────────────────────────────────
+
 function ConfigForm({
   courseName,
+  topicOptions,
   onStart,
+  onBack,
   loading,
   examMode,
 }: {
   courseName: string
+  topicOptions?: string[]
   onStart: (cfg: ConfigState) => void
+  onBack?: () => void
   loading: boolean
   examMode?: boolean
 }) {
+  const [topicFilter, setTopicFilter] = useState('')
   const [format, setFormat] = useState<QuizFormat>('mc')
   const [questionCount, setQuestionCount] = useState(10)
-  const [topicFilter, setTopicFilter] = useState('')
+  const [difficulty, setDifficulty] = useState<Difficulty>('medium')
+  const [checkTiming, setCheckTiming] = useState<CheckTiming>('after_each')
 
   const formats: { value: QuizFormat; label: string; desc: string }[] = [
     { value: 'mc', label: 'Multiple Choice', desc: 'Tap to select the correct answer' },
@@ -105,40 +150,86 @@ function ConfigForm({
     { value: 'mixed', label: 'Mixed', desc: 'Combination of both types' },
   ]
 
+  const difficulties: { value: Difficulty; label: string; color: string }[] = [
+    { value: 'easy', label: 'Easy', color: 'border-emerald-500 bg-emerald-500/5 text-emerald-600' },
+    { value: 'medium', label: 'Medium', color: 'border-amber-500 bg-amber-500/5 text-amber-600' },
+    { value: 'hard', label: 'Hard', color: 'border-red-500 bg-red-500/5 text-red-600' },
+  ]
+
   const counts = [5, 10, 15, 20]
 
   return (
     <div className="flex flex-1 flex-col overflow-y-auto">
-      <div className="flex flex-col gap-6 p-6">
-        <div>
-          <h2 className="font-heading text-lg font-semibold text-foreground">
-            {examMode ? 'Simulated Exam' : 'Practice Quiz'}
-          </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {examMode
-              ? `AI-generated exam for ${courseName} matching your professor's style and timing.`
-              : `Custom quiz for ${courseName}. Weighted toward your weakest topics.`
-            }
-          </p>
+      <div className="flex flex-col gap-5 p-5">
+        {/* Back button + title */}
+        <div className="flex items-center gap-3">
+          {onBack && (
+            <button
+              onClick={onBack}
+              className="flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
+            >
+              <ArrowLeft size={15} />
+            </button>
+          )}
+          <div>
+            <h2 className="font-heading text-base font-semibold text-foreground">
+              {examMode ? 'Simulated Exam' : 'Practice Quiz'}
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              {examMode
+                ? `Timed exam for ${courseName} mirroring your professor's style.`
+                : `Custom quiz for ${courseName}, weighted toward weak topics.`
+              }
+            </p>
+          </div>
         </div>
 
         {!examMode && (
           <>
+            {/* Topic */}
             <div className="flex flex-col gap-2">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Topic (optional)</label>
-              <input
-                type="text"
-                value={topicFilter}
-                onChange={e => setTopicFilter(e.target.value)}
-                placeholder="e.g. Derivatives, Integration…"
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/40"
-              />
-              <p className="text-xs text-muted-foreground">Leave blank to draw from all topics, weighted toward weak areas.</p>
+              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Topic</label>
+              {topicOptions && topicOptions.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    onClick={() => setTopicFilter('')}
+                    className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                      topicFilter === ''
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-border text-muted-foreground hover:border-primary/40'
+                    }`}
+                  >
+                    All Topics
+                  </button>
+                  {topicOptions.map(t => (
+                    <button
+                      key={t}
+                      onClick={() => setTopicFilter(prev => prev === t ? '' : t)}
+                      className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                        topicFilter === t
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-border text-muted-foreground hover:border-primary/40'
+                      }`}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <input
+                  type="text"
+                  value={topicFilter}
+                  onChange={e => setTopicFilter(e.target.value)}
+                  placeholder="e.g. Derivatives, Integration… (leave blank for all)"
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/40"
+                />
+              )}
             </div>
 
+            {/* Format */}
             <div className="flex flex-col gap-2">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Format</label>
-              <div className="grid grid-cols-1 gap-2">
+              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Format</label>
+              <div className="flex flex-col gap-1.5">
                 {formats.map(f => (
                   <button
                     key={f.value}
@@ -156,8 +247,27 @@ function ConfigForm({
               </div>
             </div>
 
+            {/* Difficulty */}
             <div className="flex flex-col gap-2">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Questions</label>
+              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Difficulty</label>
+              <div className="flex gap-2">
+                {difficulties.map(d => (
+                  <button
+                    key={d.value}
+                    onClick={() => setDifficulty(d.value)}
+                    className={`flex-1 rounded-lg border py-2 text-sm font-medium transition-colors ${
+                      difficulty === d.value ? d.color : 'border-border text-muted-foreground hover:bg-muted/30'
+                    }`}
+                  >
+                    {d.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Question count */}
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Questions</label>
               <div className="flex gap-2">
                 {counts.map(n => (
                   <button
@@ -166,7 +276,7 @@ function ConfigForm({
                     className={`flex-1 rounded-lg border py-2 text-sm font-medium transition-colors ${
                       questionCount === n
                         ? 'border-primary bg-primary/5 text-primary'
-                        : 'border-border text-muted-foreground hover:border-border/80 hover:bg-muted/30'
+                        : 'border-border text-muted-foreground hover:bg-muted/30'
                     }`}
                   >
                     {n}
@@ -174,30 +284,49 @@ function ConfigForm({
                 ))}
               </div>
             </div>
+
+            {/* Check timing */}
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Answer Feedback</label>
+              <div className="flex flex-col gap-1.5">
+                <button
+                  onClick={() => setCheckTiming('after_each')}
+                  className={`flex flex-col gap-0.5 rounded-lg border px-3 py-2.5 text-left transition-colors ${
+                    checkTiming === 'after_each' ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/30'
+                  }`}
+                >
+                  <span className="text-sm font-medium text-foreground">Check after each question</span>
+                  <span className="text-xs text-muted-foreground">See if you're right immediately, with explanation</span>
+                </button>
+                <button
+                  onClick={() => setCheckTiming('at_end')}
+                  className={`flex flex-col gap-0.5 rounded-lg border px-3 py-2.5 text-left transition-colors ${
+                    checkTiming === 'at_end' ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/30'
+                  }`}
+                >
+                  <span className="text-sm font-medium text-foreground">Show results at the end</span>
+                  <span className="text-xs text-muted-foreground">Answer all questions, then see your score</span>
+                </button>
+              </div>
+            </div>
           </>
         )}
 
         {examMode && (
           <div className="rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-            <p>The exam will be timed based on your course exam duration. Once started, it cannot be paused. Questions are generated to match your professor&apos;s style.</p>
+            <p>The exam is timed to match your course exam duration. Once started, it cannot be paused. Questions are generated to mirror your professor&apos;s style and topic weighting.</p>
           </div>
         )}
 
         <button
-          onClick={() => onStart({ topicFilter, format, questionCount })}
+          onClick={() => onStart({ topicFilter, format, questionCount, difficulty, checkTiming })}
           disabled={loading}
           className="flex items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
         >
           {loading ? (
-            <>
-              <CircleNotch size={16} className="animate-spin" />
-              Generating questions…
-            </>
+            <><CircleNotch size={16} className="animate-spin" /> Generating questions…</>
           ) : (
-            <>
-              {examMode ? 'Start Exam' : 'Start Quiz'}
-              <ArrowRight size={16} weight="bold" />
-            </>
+            <>{examMode ? 'Start Exam' : 'Start Quiz'} <ArrowRight size={16} weight="bold" /></>
           )}
         </button>
       </div>
@@ -205,30 +334,42 @@ function ConfigForm({
   )
 }
 
+// ── Question card ─────────────────────────────────────────────────────────────
+
+type FeedbackState = { correct: boolean; userAnswer: string } | null
+
 function QuestionCard({
   question,
   index,
   total,
+  checkTiming,
   onAnswer,
 }: {
   question: QuizQuestion
   index: number
   total: number
+  checkTiming: CheckTiming
   onAnswer: (answer: string) => void
 }) {
   const [selected, setSelected] = useState<string | null>(null)
   const [shortAnswer, setShortAnswer] = useState('')
-  const confirmed = question.type === 'mc' ? selected !== null : false
+  const [feedback, setFeedback] = useState<FeedbackState>(null)
+
+  function submit() {
+    const answer = question.type === 'mc' ? (selected ?? '') : shortAnswer
+    if (checkTiming === 'after_each' && question.type === 'mc') {
+      const correct = answer.trim().toLowerCase() === question.answer.trim().toLowerCase()
+      setFeedback({ correct, userAnswer: answer })
+    } else {
+      onAnswer(answer)
+    }
+  }
 
   function handleNext() {
-    if (question.type === 'mc' && selected) {
-      onAnswer(selected)
-    } else if (question.type === 'short_answer') {
-      onAnswer(shortAnswer)
-    }
-    setSelected(null)
-    setShortAnswer('')
+    onAnswer(feedback?.userAnswer ?? (question.type === 'mc' ? (selected ?? '') : shortAnswer))
   }
+
+  const canSubmit = question.type === 'mc' ? !!selected && !feedback : shortAnswer.trim().length > 0
 
   return (
     <motion.div
@@ -237,31 +378,46 @@ function QuestionCard({
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: -20 }}
       transition={{ duration: 0.22, ease }}
-      className="flex flex-1 flex-col gap-4 p-5"
+      className="flex flex-1 flex-col gap-4 overflow-y-auto p-5"
     >
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <span>{question.topic_name}</span>
-        <span>·</span>
+        {question.topic_name && <><span>{question.topic_name}</span><span>·</span></>}
         <span>Question {index + 1} of {total}</span>
+        <span className={`ml-auto rounded-full px-2 py-0.5 text-[10px] font-medium ${question.type === 'mc' ? 'bg-primary/10 text-primary' : 'bg-amber-500/10 text-amber-600'}`}>
+          {question.type === 'mc' ? 'MC' : 'Short Answer'}
+        </span>
       </div>
 
-      <p className="text-base font-medium text-foreground leading-relaxed">{question.question}</p>
+      <div className="text-base font-medium text-foreground leading-relaxed">
+        <MathText text={question.question} block />
+      </div>
 
       {question.type === 'mc' && question.options && (
         <div className="flex flex-col gap-2">
-          {question.options.map((opt, i) => (
-            <button
-              key={i}
-              onClick={() => setSelected(opt)}
-              className={`rounded-xl border px-4 py-3 text-left text-sm transition-colors ${
-                selected === opt
-                  ? 'border-primary bg-primary/8 text-primary font-medium'
-                  : 'border-border text-foreground hover:border-primary/40 hover:bg-muted/30'
-              }`}
-            >
-              {opt}
-            </button>
-          ))}
+          {question.options.map((opt, i) => {
+            let optClass = 'border-border text-foreground hover:border-primary/40 hover:bg-muted/30'
+            if (feedback) {
+              if (opt === question.answer) {
+                optClass = 'border-emerald-500 bg-emerald-500/8 text-emerald-700'
+              } else if (opt === feedback.userAnswer && !feedback.correct) {
+                optClass = 'border-red-500 bg-red-500/8 text-red-700'
+              } else {
+                optClass = 'border-border text-muted-foreground opacity-50'
+              }
+            } else if (selected === opt) {
+              optClass = 'border-primary bg-primary/8 text-primary font-medium'
+            }
+            return (
+              <button
+                key={i}
+                onClick={() => !feedback && setSelected(opt)}
+                disabled={!!feedback}
+                className={`rounded-xl border px-4 py-3 text-left text-sm transition-colors ${optClass}`}
+              >
+                <MathText text={opt} />
+              </button>
+            )
+          })}
         </div>
       )}
 
@@ -275,27 +431,64 @@ function QuestionCard({
         />
       )}
 
-      <div className="mt-auto">
-        <button
-          onClick={handleNext}
-          disabled={question.type === 'mc' ? !selected : shortAnswer.trim().length === 0}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+      {/* Immediate feedback display */}
+      {feedback && (
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={`rounded-xl border p-3.5 flex flex-col gap-1.5 ${feedback.correct ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'}`}
         >
-          {index < total - 1 ? 'Next' : 'Submit'}
-          <ArrowRight size={15} weight="bold" />
-        </button>
-        {question.type === 'short_answer' && index < total - 1 && (
+          <div className="flex items-center gap-2">
+            {feedback.correct
+              ? <CheckCircle size={15} className="text-emerald-500 shrink-0" weight="fill" />
+              : <XCircle size={15} className="text-red-500 shrink-0" weight="fill" />
+            }
+            <span className={`text-sm font-medium ${feedback.correct ? 'text-emerald-600' : 'text-red-600'}`}>
+              {feedback.correct ? 'Correct!' : `Incorrect — correct answer: `}
+              {!feedback.correct && <span className="font-normal"><MathText text={question.answer} /></span>}
+            </span>
+          </div>
+          {question.explanation && (
+            <p className="text-xs text-muted-foreground pl-5">{question.explanation}</p>
+          )}
+        </motion.div>
+      )}
+
+      <div className="mt-auto flex flex-col gap-2">
+        {feedback ? (
           <button
-            onClick={() => onAnswer('')}
-            className="mt-2 w-full rounded-xl py-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            onClick={handleNext}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
           >
-            Skip this question
+            {index < total - 1 ? 'Next Question' : 'See Results'}
+            <ArrowRight size={15} weight="bold" />
           </button>
+        ) : (
+          <>
+            <button
+              onClick={submit}
+              disabled={!canSubmit}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-40 transition-opacity"
+            >
+              {question.type === 'mc' ? (index < total - 1 ? 'Submit' : 'Submit') : (index < total - 1 ? 'Submit' : 'Submit')}
+              <ArrowRight size={15} weight="bold" />
+            </button>
+            {question.type === 'short_answer' && (
+              <button
+                onClick={() => onAnswer('')}
+                className="w-full rounded-xl py-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Skip this question
+              </button>
+            )}
+          </>
         )}
       </div>
     </motion.div>
   )
 }
+
+// ── Results screen ─────────────────────────────────────────────────────────────
 
 function ResultsScreen({
   questions,
@@ -312,14 +505,12 @@ function ResultsScreen({
 }) {
   const [showReview, setShowReview] = useState(false)
   const { correctCount, scorePct, missedTopics, masteryUpdates } = summary
-
   const scoreColor = scorePct >= 75 ? 'text-emerald-500' : scorePct >= 50 ? 'text-amber-500' : 'text-red-500'
   const scoreBg = scorePct >= 75 ? 'bg-emerald-500/10' : scorePct >= 50 ? 'bg-amber-500/10' : 'bg-red-500/10'
 
   return (
     <div className="flex flex-1 flex-col overflow-y-auto">
       <div className="flex flex-col gap-5 p-5">
-        {/* Score hero */}
         <motion.div
           initial={{ opacity: 0, scale: 0.92 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -327,15 +518,10 @@ function ResultsScreen({
           className={`flex flex-col items-center gap-2 rounded-2xl ${scoreBg} py-8`}
         >
           <Trophy size={32} className={scoreColor} weight="fill" />
-          <div className={`font-heading text-5xl font-bold tabular-nums ${scoreColor}`}>
-            {Math.round(scorePct)}%
-          </div>
-          <p className="text-sm text-muted-foreground">
-            {correctCount} of {questions.length} correct
-          </p>
+          <div className={`font-heading text-5xl font-bold tabular-nums ${scoreColor}`}>{Math.round(scorePct)}%</div>
+          <p className="text-sm text-muted-foreground">{correctCount} of {questions.length} correct</p>
         </motion.div>
 
-        {/* Mastery updates */}
         {masteryUpdates.length > 0 && (
           <div className="flex flex-col gap-2">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Mastery Updated</p>
@@ -366,7 +552,6 @@ function ResultsScreen({
           </div>
         )}
 
-        {/* Missed topics */}
         {missedTopics.length > 0 && (
           <div className="flex flex-col gap-2">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Focus Areas</p>
@@ -380,41 +565,41 @@ function ResultsScreen({
           </div>
         )}
 
-        {/* Answer review toggle */}
         <button
           onClick={() => setShowReview(v => !v)}
           className="flex items-center gap-2 rounded-xl border border-border px-4 py-2.5 text-sm text-muted-foreground hover:bg-muted/30 transition-colors"
         >
           <ClipboardText size={15} />
-          {showReview ? 'Hide' : 'Review'} answers
+          {showReview ? 'Hide' : 'Review'} all answers
         </button>
 
         {showReview && (
           <div className="flex flex-col gap-3">
             {questions.map((q, i) => {
               const ua = userAnswers[i] ?? ''
-              const correct = ua.toLowerCase() === q.answer.toLowerCase() || (!ua && false)
+              const correct = ua.toLowerCase().trim() === q.answer.toLowerCase().trim()
               return (
                 <div key={i} className={`rounded-xl border p-3.5 flex flex-col gap-2 ${correct ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-red-500/20 bg-red-500/5'}`}>
                   <div className="flex items-start gap-2">
                     {correct
-                      ? <CheckCircle size={16} className="mt-0.5 shrink-0 text-emerald-500" weight="fill" />
-                      : <XCircle size={16} className="mt-0.5 shrink-0 text-red-500" weight="fill" />
+                      ? <CheckCircle size={15} className="mt-0.5 shrink-0 text-emerald-500" weight="fill" />
+                      : <XCircle size={15} className="mt-0.5 shrink-0 text-red-500" weight="fill" />
                     }
-                    <p className="text-sm text-foreground">{q.question}</p>
+                    <div className="text-sm text-foreground"><MathText text={q.question} /></div>
                   </div>
                   {!correct && ua && (
-                    <p className="text-xs text-red-500 pl-6">Your answer: {ua}</p>
+                    <div className="text-xs text-red-500 pl-5">Your answer: <MathText text={ua} /></div>
                   )}
-                  <p className="text-xs text-muted-foreground pl-6">Correct: {q.answer}</p>
-                  <p className="text-xs text-muted-foreground/70 pl-6 italic">{q.explanation}</p>
+                  <div className="text-xs text-muted-foreground pl-5">Correct: <MathText text={q.answer} /></div>
+                  {q.explanation && (
+                    <p className="text-xs text-muted-foreground/70 pl-5 italic">{q.explanation}</p>
+                  )}
                 </div>
               )
             })}
           </div>
         )}
 
-        {/* Actions */}
         <div className="flex gap-2">
           {onRetry && (
             <button
@@ -439,15 +624,21 @@ function ResultsScreen({
   )
 }
 
-export function QuizSession({ courseId, courseName, initialQuestions, examMode, onClose, onComplete }: Props) {
-  const [phase, setPhase] = useState<QuizState>(initialQuestions ? 'quiz' : 'config')
-  const [questions, setQuestions] = useState<QuizQuestion[]>(initialQuestions ?? [])
+// ── Main QuizSession ──────────────────────────────────────────────────────────
+
+export function QuizSession({ courseId, courseName, topicOptions, initialQuestions, examMode, onClose, onComplete }: Props) {
+  const normalizedInitial = initialQuestions?.map(normalizeQuestion)
+  const [phase, setPhase] = useState<QuizPhase>(normalizedInitial ? 'quiz' : 'config')
+  const [questions, setQuestions] = useState<QuizQuestion[]>(normalizedInitial ?? [])
   const [currentIndex, setCurrentIndex] = useState(0)
   const [userAnswers, setUserAnswers] = useState<string[]>([])
   const [summary, setSummary] = useState<GradeSummary | null>(null)
-  const [configState, setConfigState] = useState<ConfigState>({ topicFilter: '', format: 'mc', questionCount: 10 })
+  const [configState, setConfigState] = useState<ConfigState>({
+    topicFilter: '', format: 'mc', questionCount: 10, difficulty: 'medium', checkTiming: 'after_each',
+  })
   const [examDuration, setExamDuration] = useState(0)
   const [startTime, setStartTime] = useState<number>(0)
+  const [loadingConfig, setLoadingConfig] = useState(false)
   const onExpireRef = useRef<() => void>(() => {})
 
   const submitAnswers = useCallback(async (answers: string[], qs: QuizQuestion[]) => {
@@ -480,7 +671,7 @@ export function QuizSession({ courseId, courseName, initialQuestions, examMode, 
 
   async function handleStart(cfg: ConfigState) {
     setConfigState(cfg)
-    setPhase('loading')
+    setLoadingConfig(true)
 
     try {
       const endpoint = examMode ? '/api/agents/simulated-exam' : '/api/agents/practice-quiz'
@@ -493,17 +684,25 @@ export function QuizSession({ courseId, courseName, initialQuestions, examMode, 
           format: cfg.format,
           questionCount: cfg.questionCount,
           topicFilter: cfg.topicFilter || undefined,
+          difficulty: cfg.difficulty,
         }),
       })
-      const data = await res.json() as { questions: QuizQuestion[]; durationMinutes?: number }
-      setQuestions(data.questions)
+      const data = await res.json() as { questions: QuizQuestion[]; durationMinutes?: number; error?: string }
+      if (data.error) {
+        alert(data.error)
+        setLoadingConfig(false)
+        return
+      }
+      setQuestions(data.questions.map(normalizeQuestion))
       if (data.durationMinutes) setExamDuration(data.durationMinutes * 60)
       setUserAnswers([])
       setCurrentIndex(0)
       setStartTime(Date.now())
       setPhase('quiz')
     } catch {
-      setPhase('config')
+      // stay on config
+    } finally {
+      setLoadingConfig(false)
     }
   }
 
@@ -524,6 +723,7 @@ export function QuizSession({ courseId, courseName, initialQuestions, examMode, 
     setUserAnswers([])
     setCurrentIndex(0)
     setSummary(null)
+    setLoadingConfig(false)
   }
 
   return (
@@ -539,10 +739,7 @@ export function QuizSession({ courseId, courseName, initialQuestions, examMode, 
         {phase === 'quiz' && (
           <div className="flex items-center gap-2 shrink-0">
             {examMode && examDuration > 0 && (
-              <CountdownTimer
-                totalSeconds={examDuration}
-                onExpire={() => onExpireRef.current()}
-              />
+              <CountdownTimer totalSeconds={examDuration} onExpire={() => onExpireRef.current()} />
             )}
             <span className="text-xs text-muted-foreground tabular-nums">
               {currentIndex + 1}/{questions.length}
@@ -551,18 +748,23 @@ export function QuizSession({ courseId, courseName, initialQuestions, examMode, 
         )}
       </div>
 
-      {/* Progress bar */}
       {phase === 'quiz' && questions.length > 0 && (
         <div className="px-4 pt-3 shrink-0">
           <ProgressBar current={currentIndex} total={questions.length} />
         </div>
       )}
 
-      {/* Body */}
       <AnimatePresence mode="wait">
         {phase === 'config' && (
           <motion.div key="config" className="flex flex-1 flex-col overflow-hidden" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <ConfigForm courseName={courseName} onStart={handleStart} loading={false} examMode={examMode} />
+            <ConfigForm
+              courseName={courseName}
+              topicOptions={topicOptions}
+              onStart={handleStart}
+              onBack={onClose}
+              loading={loadingConfig}
+              examMode={examMode}
+            />
           </motion.div>
         )}
 
@@ -581,6 +783,7 @@ export function QuizSession({ courseId, courseName, initialQuestions, examMode, 
                 question={questions[currentIndex]}
                 index={currentIndex}
                 total={questions.length}
+                checkTiming={normalizedInitial ? 'after_each' : configState.checkTiming}
                 onAnswer={handleAnswer}
               />
             </AnimatePresence>

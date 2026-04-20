@@ -38,6 +38,7 @@ export async function generatePracticeQuiz(
   format: QuizFormat,
   questionCount: number,
   topicFilter?: string,
+  difficulty: 'easy' | 'medium' | 'hard' = 'medium',
 ): Promise<QuizQuestion[]> {
   const apiKey = await getUserApiKey(userId)
   if (!apiKey) throw new Error('No API key')
@@ -79,6 +80,13 @@ export async function generatePracticeQuiz(
       ? 'Generate ONLY short-answer questions. No multiple choice.'
       : `Generate a mix: roughly 60% multiple-choice, 40% short-answer. Use "type": "mc" or "type": "short_answer".`
 
+  const difficultyInstruction =
+    difficulty === 'easy'
+      ? 'Difficulty: EASY — straightforward recall questions, familiar phrasing, single-concept per question.'
+      : difficulty === 'hard'
+      ? 'Difficulty: HARD — synthesis questions, edge cases, multi-concept reasoning, tricky distractors.'
+      : 'Difficulty: MEDIUM — standard exam-style questions, moderate complexity.'
+
   const client = new Anthropic({ apiKey })
   const response = await client.messages.create({
     model: 'claude-haiku-4-5-20251001',
@@ -91,6 +99,7 @@ export async function generatePracticeQuiz(
 ${topicFilter ? `Focus specifically on: ${topicFilter}` : `Topics available (weighted toward low-mastery first):\n${topicList}`}
 
 ${formatInstruction}
+${difficultyInstruction}
 
 Return ONLY a JSON array of question objects. No markdown, no explanation.
 

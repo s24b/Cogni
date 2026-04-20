@@ -115,31 +115,40 @@ function CourseCard({ course }: { course: Course }) {
 
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden">
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="flex w-full items-center gap-3 px-5 py-4 text-left hover:bg-muted/20 transition-colors"
-      >
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-          <BookOpen size={18} className="text-primary" weight="fill" />
+      {/* Header — plain div so Practice button is not nested inside a button */}
+      <div className="flex w-full items-center gap-3 px-5 py-4">
+        <div
+          className="flex flex-1 items-center gap-3 cursor-pointer"
+          onClick={() => setOpen(o => !o)}
+        >
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+            <BookOpen size={18} className="text-primary" weight="fill" />
+          </div>
+          <div className="flex flex-1 flex-col min-w-0">
+            <span className="text-sm font-semibold text-foreground truncate">{course.name}</span>
+            {course.professor_name && (
+              <span className="text-xs text-muted-foreground">{course.professor_name}</span>
+            )}
+          </div>
         </div>
-        <div className="flex flex-1 flex-col min-w-0">
-          <span className="text-sm font-semibold text-foreground truncate">{course.name}</span>
-          {course.professor_name && (
-            <span className="text-xs text-muted-foreground">{course.professor_name}</span>
-          )}
-        </div>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span>{course.topics.length} topics</span>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-xs text-muted-foreground">{course.topics.length} topics</span>
           <button
-            onClick={e => { e.stopPropagation(); router.push(`/courses/${course.course_id}`) }}
-            className="flex items-center gap-1 rounded-lg bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/20 transition-colors"
+            onClick={() => router.push(`/courses/${course.course_id}`)}
+            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90"
           >
-            <ClipboardText size={11} weight="fill" />
+            <ClipboardText size={12} weight="fill" />
             Practice
           </button>
-          {open ? <CaretDown size={14} /> : <CaretRight size={14} />}
+          <div
+            className="cursor-pointer p-1 text-muted-foreground hover:text-foreground transition-colors"
+            onClick={() => setOpen(o => !o)}
+          >
+            {open ? <CaretDown size={14} /> : <CaretRight size={14} />}
+          </div>
         </div>
-      </button>
+      </div>
 
       <AnimatePresence initial={false}>
         {open && course.topics.length > 0 && (
@@ -189,7 +198,7 @@ export function CoursesClient({ courses }: { courses: Course[] }) {
   }
 
   return (
-    <div className="flex flex-1 flex-col gap-6 p-6">
+    <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-6">
       <div>
         <h1 className="font-heading text-2xl font-semibold text-foreground">Courses</h1>
         <p className="mt-1 text-sm text-muted-foreground">
