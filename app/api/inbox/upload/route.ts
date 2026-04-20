@@ -9,35 +9,61 @@ export async function POST(request: Request) {
 
   const form = await request.formData()
   const file = form.get('file') as File | null
-  if (!file) return NextResponse.json({ error: 'No file' }, { status: 400 })
+  const textContent = form.get('textContent') as string | null
+  const context = (form.get('context') as string | null) ?? undefined
+  const courseIdHint = (form.get('courseId') as string | null) ?? undefined
 
-  const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
-  const allowedExts = ['pdf', 'txt', 'md']
-  if (!allowedExts.includes(ext)) {
-    return NextResponse.json({ error: 'Unsupported file type. Upload PDF or TXT.' }, { status: 400 })
+  if (!file && !textContent) {
+    return NextResponse.json({ error: 'No file or text content' }, { status: 400 })
   }
 
   const service = createServiceClient()
 
-  // Reject duplicates by filename
-  const { data: existing } = await service
-    .from('materials')
-    .select('material_id')
-    .eq('user_id', user.id)
-    .eq('filename', file.name)
-    .limit(1)
+  let filename: string
+  let ext: string
+  let fileBlob: Blob
+  let contentType: string
 
-  if (existing && existing.length > 0) {
-    return NextResponse.json(
-      { error: `"${file.name}" has already been uploaded. Delete the existing one first if you want to re-upload.` },
-      { status: 409 }
-    )
+  if (file) {
+    ext = file.name.split('.').pop()?.toLowerCase() ?? ''
+    const allowedExts = ['pdf', 'txt', 'md']
+    if (!allowedExts.includes(ext)) {
+      return NextResponse.json({ error: 'Unsupported file type. Upload PDF or TXT.' }, { status: 400 })
+    }
+    filename = file.name
+    fileBlob = file
+    contentType = file.type || 'application/octet-stream'
+  } else {
+    // Text entry — store as a .txt material
+    const label = (form.get('name') as string | null)?.trim() || 'Note'
+    filename = `${label.replace(/[^a-zA-Z0-9 _-]/g, '').trim()}_${Date.now()}.txt`
+    ext = 'txt'
+    fileBlob = new Blob([textContent!], { type: 'text/plain' })
+    contentType = 'text/plain'
   }
-  const storagePath = `${user.id}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+
+  // Reject duplicates by filename (files only, not text entries)
+  if (file) {
+    const { data: existing } = await service
+      .from('materials')
+      .select('material_id')
+      .eq('user_id', user.id)
+      .eq('filename', filename)
+      .limit(1)
+
+    if (existing && existing.length > 0) {
+      return NextResponse.json(
+        { error: `"${filename}" has already been uploaded.` },
+        { status: 409 }
+      )
+    }
+  }
+
+  const storagePath = `${user.id}/${Date.now()}-${filename.replace(/[^a-zA-Z0-9._-]/g, '_')}`
 
   const { error: uploadError } = await service.storage
     .from('materials')
-    .upload(storagePath, file, { contentType: file.type, upsert: false })
+    .upload(storagePath, fileBlob, { contentType, upsert: false })
 
   if (uploadError) {
     return NextResponse.json({ error: uploadError.message }, { status: 500 })
@@ -47,9 +73,9 @@ export async function POST(request: Request) {
     .from('materials')
     .insert({
       user_id: user.id,
-      filename: file.name,
+      filename,
       storage_path: storagePath,
-      file_type: ext,
+      file_type: file ? ext : 'typed',
       tier: null,
       processing_status: 'pending',
     })
@@ -74,7 +100,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: inboxError?.message ?? 'DB error' }, { status: 500 })
   }
 
-  const result = await classifyMaterial(user.id, material.material_id, storagePath, file.name, ext)
+  const result = await classifyMaterial(
+    user.id,
+    material.material_id,
+    storagePath,
+    filename,
+    ext,
+    context,
+    courseIdHint,
+  )
 
   return NextResponse.json({ ok: true, inbox_item_id: inboxItem.inbox_item_id, ...result })
 }

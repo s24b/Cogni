@@ -11,7 +11,20 @@ import {
   CircleNotch,
   ClipboardText,
   GraduationCap,
+  Archive,
+  FilePdf,
+  FileText,
+  Image,
+  Keyboard,
+  CaretDown,
+  CaretUp,
+  User,
+  X,
+  UploadSimple,
+  Check,
 } from '@phosphor-icons/react'
+import { useCallback } from 'react'
+import { useDropzone } from 'react-dropzone'
 import { StaggerList, StaggerItem, ease } from '@/components/ui/motion'
 import { QuizSession } from '@/components/quiz/QuizSession'
 
@@ -30,6 +43,7 @@ type Course = {
   course_id: string
   name: string
   course_type: string | null
+  professor_id: string | null
   professor_name: string | null
   topics: Topic[]
 }
@@ -44,11 +58,47 @@ type TestResult = {
   created_at: string
 }
 
+type Material = {
+  material_id: string
+  tier: number | null
+  file_type: string | null
+  filename: string | null
+  processing_status: string
+  uploaded_at: string
+}
+
+const TIER_LABELS: Record<number, string> = {
+  1: 'Syllabus',
+  2: 'Lecture Notes',
+  3: 'Textbook',
+  4: 'Practice Problems',
+}
+
+function FileIcon({ fileType }: { fileType: string | null }) {
+  if (fileType === 'pdf') return <FilePdf size={14} className="text-red-400" weight="fill" />
+  if (fileType === 'image') return <Image size={14} className="text-blue-400" weight="fill" />
+  if (fileType === 'typed') return <Keyboard size={14} className="text-primary" weight="fill" />
+  return <FileText size={14} className="text-muted-foreground" weight="fill" />
+}
+
+function StatusChip({ status }: { status: string }) {
+  const styles: Record<string, string> = {
+    processed: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+    processing: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
+    pending: 'bg-muted text-muted-foreground',
+    failed: 'bg-red-500/10 text-red-500',
+  }
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${styles[status] ?? styles.pending}`}>
+      {status}
+    </span>
+  )
+}
+
 function DualBar({ mastery, coverage }: { mastery: number | null; coverage: number }) {
   const m = Math.round((mastery ?? 0) * 100)
   const c = Math.round(coverage * 100)
   const mColor = m >= 75 ? 'bg-emerald-500' : m >= 40 ? 'bg-amber-400' : 'bg-red-400'
-  const cColor = 'bg-blue-400'
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center gap-2">
@@ -61,7 +111,7 @@ function DualBar({ mastery, coverage }: { mastery: number | null; coverage: numb
       <div className="flex items-center gap-2">
         <span className="w-16 text-[10px] text-muted-foreground">Coverage</span>
         <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-          <div className={`h-full rounded-full ${cColor}`} style={{ width: `${c}%` }} />
+          <div className="h-full rounded-full bg-blue-400" style={{ width: `${c}%` }} />
         </div>
         <span className="w-7 text-right text-[10px] tabular-nums text-muted-foreground">{c}%</span>
       </div>
@@ -148,17 +198,237 @@ function TestResultRow({ result }: { result: TestResult }) {
   )
 }
 
+function MaterialRow({ material }: { material: Material }) {
+  const date = new Date(material.uploaded_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  const tierLabel = material.tier ? (TIER_LABELS[material.tier] ?? `Tier ${material.tier}`) : 'Uncategorized'
+
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
+      <FileIcon fileType={material.file_type} />
+      <div className="flex flex-1 flex-col gap-0.5 min-w-0">
+        <span className="text-sm text-foreground truncate">{material.filename ?? 'Untitled'}</span>
+        <span className="text-xs text-muted-foreground">{tierLabel} · {date}</span>
+      </div>
+      <StatusChip status={material.processing_status} />
+    </div>
+  )
+}
+
+function ProfessorProfile({ wiki }: { wiki: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const preview = wiki.slice(0, 300)
+  const hasMore = wiki.length > 300
+
+  return (
+    <div className="rounded-xl border border-border bg-card px-4 py-3">
+      <div className="flex items-center gap-2 mb-2">
+        <User size={14} className="text-primary" weight="fill" />
+        <span className="text-sm font-semibold text-foreground">Professor Profile</span>
+      </div>
+      <div className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap">
+        {expanded ? wiki : preview}
+        {!expanded && hasMore && '…'}
+      </div>
+      {hasMore && (
+        <button
+          onClick={() => setExpanded(v => !v)}
+          className="mt-2 flex items-center gap-1 text-xs text-primary hover:opacity-80 transition-opacity"
+        >
+          {expanded ? <CaretUp size={11} /> : <CaretDown size={11} />}
+          {expanded ? 'Show less' : 'Show more'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+function CourseUpload({ courseId, onDone }: { courseId: string; onDone: () => void }) {
+  const [uploading, setUploading] = useState(false)
+  const [results, setResults] = useState<{ name: string; ok: boolean }[]>([])
+
+  const onDrop = useCallback(async (accepted: File[]) => {
+    if (!accepted.length) return
+    setUploading(true)
+    const next: { name: string; ok: boolean }[] = []
+    for (const file of accepted) {
+      const form = new FormData()
+      form.append('file', file)
+      form.append('courseId', courseId)
+      try {
+        const res = await fetch('/api/inbox/upload', { method: 'POST', body: form })
+        next.push({ name: file.name, ok: res.ok })
+      } catch {
+        next.push({ name: file.name, ok: false })
+      }
+    }
+    setResults(next)
+    setUploading(false)
+    if (next.some(r => r.ok)) onDone()
+    setTimeout(() => setResults([]), 3000)
+  }, [courseId, onDone])
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: { 'application/pdf': ['.pdf'], 'text/plain': ['.txt'], 'text/markdown': ['.md'] },
+    multiple: true,
+    disabled: uploading,
+  })
+
+  return (
+    <div className="flex flex-col gap-3">
+      <h2 className="text-sm font-semibold text-foreground">Upload to this course</h2>
+      <div
+        {...getRootProps()}
+        className={`flex cursor-pointer items-center justify-center gap-3 rounded-xl border-2 border-dashed px-4 py-5 transition-colors ${
+          uploading ? 'cursor-not-allowed border-border bg-muted/30'
+            : isDragActive ? 'border-primary bg-primary/5'
+            : 'border-border bg-muted/10 hover:border-primary/50 hover:bg-muted/20'
+        }`}
+      >
+        <input {...getInputProps()} />
+        {uploading
+          ? <><CircleNotch size={16} className="animate-spin text-primary" /><span className="text-sm text-muted-foreground">Uploading…</span></>
+          : <><UploadSimple size={16} className="text-primary" weight="bold" /><span className="text-sm text-muted-foreground">{isDragActive ? 'Drop to upload' : 'Drop files or click — PDF, TXT, MD'}</span></>
+        }
+      </div>
+      {results.length > 0 && (
+        <div className="flex flex-col gap-1">
+          {results.map((r, i) => (
+            <div key={i} className="flex items-center gap-2 text-xs">
+              {r.ok
+                ? <Check size={11} className="text-emerald-500" weight="bold" />
+                : <X size={11} className="text-red-500" />
+              }
+              <span className={r.ok ? 'text-muted-foreground' : 'text-red-500'}>{r.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ArchiveModal({
+  courseName,
+  onConfirm,
+  onCancel,
+}: {
+  courseName: string
+  onConfirm: (keepFlashcards: boolean, keepProfessor: boolean) => void
+  onCancel: () => void
+}) {
+  const [keepFlashcards, setKeepFlashcards] = useState(true)
+  const [keepProfessor, setKeepProfessor] = useState(true)
+  const [loading, setLoading] = useState(false)
+
+  async function handleConfirm() {
+    setLoading(true)
+    onConfirm(keepFlashcards, keepProfessor)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-background/80 backdrop-blur-sm">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-xl"
+      >
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">Archive course?</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">{courseName}</p>
+          </div>
+          <button
+            onClick={onCancel}
+            className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/50 transition-colors"
+          >
+            <X size={14} />
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-medium text-foreground">Keep flashcard deck?</p>
+            <p className="text-xs text-muted-foreground leading-snug">
+              Yes = review intervals doubled (slower decay). No = cards paused until reactivated.
+            </p>
+            <div className="flex gap-2 mt-1">
+              <button
+                onClick={() => setKeepFlashcards(true)}
+                className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${keepFlashcards ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:bg-muted/30'}`}
+              >
+                Yes, keep
+              </button>
+              <button
+                onClick={() => setKeepFlashcards(false)}
+                className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${!keepFlashcards ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:bg-muted/30'}`}
+              >
+                No, pause
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-medium text-foreground">Keep professor profile?</p>
+            <p className="text-xs text-muted-foreground leading-snug">
+              The professor&apos;s style notes will be deleted if you choose No.
+            </p>
+            <div className="flex gap-2 mt-1">
+              <button
+                onClick={() => setKeepProfessor(true)}
+                className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${keepProfessor ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:bg-muted/30'}`}
+              >
+                Yes, keep
+              </button>
+              <button
+                onClick={() => setKeepProfessor(false)}
+                className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${!keepProfessor ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:bg-muted/30'}`}
+              >
+                No, delete
+              </button>
+            </div>
+          </div>
+
+          <button
+            onClick={handleConfirm}
+            disabled={loading}
+            className="mt-1 w-full rounded-xl bg-red-500 px-4 py-3 text-sm font-semibold text-white hover:bg-red-600 disabled:opacity-50 transition-colors"
+          >
+            {loading ? 'Archiving…' : 'Archive course'}
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  )
+}
+
 type Mode = 'overview' | 'quiz' | 'exam'
 
 export function CourseDetailClient({
   course,
   testResults,
+  materials,
+  professorWiki,
 }: {
   course: Course
   testResults: TestResult[]
+  materials: Material[]
+  professorWiki: string | null
 }) {
   const router = useRouter()
   const [mode, setMode] = useState<Mode>('overview')
+  const [showArchiveModal, setShowArchiveModal] = useState(false)
+
+  async function handleArchive(keepFlashcards: boolean, keepProfessor: boolean) {
+    await fetch(`/api/courses/${course.course_id}/archive`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keepFlashcards, keepProfessor }),
+    })
+    router.push('/courses')
+    router.refresh()
+  }
 
   const topicNames = course.topics.map(t => t.name)
 
@@ -189,92 +459,148 @@ export function CourseDetailClient({
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center gap-3 border-b border-border px-5 py-4 shrink-0">
-        <button
-          onClick={() => router.back()}
-          className="flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
-        >
-          <ArrowLeft size={16} />
-        </button>
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-          <BookOpen size={18} className="text-primary" weight="fill" />
-        </div>
-        <div className="flex flex-1 flex-col min-w-0">
-          <span className="text-sm font-semibold text-foreground truncate">{course.name}</span>
-          {course.professor_name && (
-            <span className="text-xs text-muted-foreground">{course.professor_name}</span>
-          )}
-        </div>
-      </div>
-
-      {/* Scrollable body */}
-      <div className="flex flex-1 flex-col overflow-y-auto">
-        <div className="flex flex-col gap-6 p-5">
-
-          {/* Practice buttons */}
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              onClick={() => setMode('quiz')}
-              className="flex flex-col gap-2 rounded-xl border border-border bg-card px-4 py-4 text-left hover:bg-muted/20 transition-colors"
-            >
-              <div className="flex size-9 items-center justify-center rounded-lg bg-primary/10">
-                <ClipboardText size={18} className="text-primary" weight="fill" />
-              </div>
-              <span className="text-sm font-semibold text-foreground">Practice Quiz</span>
-              <span className="text-xs text-muted-foreground leading-snug">Custom questions, weak-area weighted</span>
-            </button>
-            <button
-              onClick={() => setMode('exam')}
-              className="flex flex-col gap-2 rounded-xl border border-border bg-card px-4 py-4 text-left hover:bg-muted/20 transition-colors"
-            >
-              <div className="flex size-9 items-center justify-center rounded-lg bg-purple-500/10">
-                <GraduationCap size={18} className="text-purple-500" weight="fill" />
-              </div>
-              <span className="text-sm font-semibold text-foreground">Simulated Exam</span>
-              <span className="text-xs text-muted-foreground leading-snug">Timed, mirrors your professor&apos;s style</span>
-            </button>
+    <>
+      <div className="flex h-full flex-col overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center gap-3 border-b border-border px-5 py-4 shrink-0">
+          <button
+            onClick={() => router.back()}
+            className="flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
+          >
+            <ArrowLeft size={16} />
+          </button>
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+            <BookOpen size={18} className="text-primary" weight="fill" />
           </div>
-
-          {/* Topics */}
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-foreground">Topics</h2>
-              <span className="text-xs text-muted-foreground">{course.topics.length}</span>
-            </div>
-            {course.topics.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No topics yet — upload a syllabus in the Inbox.</p>
-            ) : (
-              <StaggerList className="flex flex-col gap-2">
-                {course.topics.map(topic => (
-                  <StaggerItem key={topic.topic_id}>
-                    <TopicRow
-                      topic={topic}
-                      courseId={course.course_id}
-                      onRefresh={() => router.refresh()}
-                    />
-                  </StaggerItem>
-                ))}
-              </StaggerList>
+          <div className="flex flex-1 flex-col min-w-0">
+            <span className="text-sm font-semibold text-foreground truncate">{course.name}</span>
+            {course.professor_name && (
+              <span className="text-xs text-muted-foreground">{course.professor_name}</span>
             )}
           </div>
+          <button
+            onClick={() => setShowArchiveModal(true)}
+            className="flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
+            title="Archive course"
+          >
+            <Archive size={16} />
+          </button>
+        </div>
 
-          {/* Test history */}
-          {testResults.length > 0 && (
-            <div className="flex flex-col gap-3">
-              <h2 className="text-sm font-semibold text-foreground">Test History</h2>
-              <StaggerList className="flex flex-col gap-2">
-                {testResults.map(r => (
-                  <StaggerItem key={r.result_id}>
-                    <TestResultRow result={r} />
-                  </StaggerItem>
-                ))}
-              </StaggerList>
+        {/* Scrollable body */}
+        <div className="flex flex-1 flex-col overflow-y-auto">
+          <div className="flex flex-col gap-6 p-5">
+
+            {/* Practice buttons */}
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => setMode('quiz')}
+                className="flex flex-col gap-2 rounded-xl border border-border bg-card px-4 py-4 text-left hover:bg-muted/20 transition-colors"
+              >
+                <div className="flex size-9 items-center justify-center rounded-lg bg-primary/10">
+                  <ClipboardText size={18} className="text-primary" weight="fill" />
+                </div>
+                <span className="text-sm font-semibold text-foreground">Practice Quiz</span>
+                <span className="text-xs text-muted-foreground leading-snug">Custom questions, weak-area weighted</span>
+              </button>
+              <button
+                onClick={() => setMode('exam')}
+                className="flex flex-col gap-2 rounded-xl border border-border bg-card px-4 py-4 text-left hover:bg-muted/20 transition-colors"
+              >
+                <div className="flex size-9 items-center justify-center rounded-lg bg-purple-500/10">
+                  <GraduationCap size={18} className="text-purple-500" weight="fill" />
+                </div>
+                <span className="text-sm font-semibold text-foreground">Simulated Exam</span>
+                <span className="text-xs text-muted-foreground leading-snug">Timed, mirrors your professor&apos;s style</span>
+              </button>
             </div>
-          )}
+
+            {/* Upload to course */}
+            <CourseUpload courseId={course.course_id} onDone={() => router.refresh()} />
+
+            {/* Professor profile */}
+            {course.professor_name && (
+              <div className="flex flex-col gap-3">
+                <h2 className="text-sm font-semibold text-foreground">Professor Insights</h2>
+                {professorWiki ? (
+                  <ProfessorProfile wiki={professorWiki} />
+                ) : (
+                  <div className="flex items-center gap-3 rounded-xl border border-dashed border-border px-4 py-3">
+                    <User size={14} className="text-muted-foreground shrink-0" weight="fill" />
+                    <span className="text-xs text-muted-foreground">
+                      Profile for {course.professor_name} will build after course materials are uploaded and processed.
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Topics */}
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-foreground">Topics</h2>
+                <span className="text-xs text-muted-foreground">{course.topics.length}</span>
+              </div>
+              {course.topics.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No topics yet — upload a syllabus in the Inbox.</p>
+              ) : (
+                <StaggerList className="flex flex-col gap-2">
+                  {course.topics.map(topic => (
+                    <StaggerItem key={topic.topic_id}>
+                      <TopicRow
+                        topic={topic}
+                        courseId={course.course_id}
+                        onRefresh={() => router.refresh()}
+                      />
+                    </StaggerItem>
+                  ))}
+                </StaggerList>
+              )}
+            </div>
+
+            {/* Materials */}
+            {materials.length > 0 && (
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm font-semibold text-foreground">Materials</h2>
+                  <span className="text-xs text-muted-foreground">{materials.length}</span>
+                </div>
+                <StaggerList className="flex flex-col gap-2">
+                  {materials.map(m => (
+                    <StaggerItem key={m.material_id}>
+                      <MaterialRow material={m} />
+                    </StaggerItem>
+                  ))}
+                </StaggerList>
+              </div>
+            )}
+
+            {/* Test history */}
+            {testResults.length > 0 && (
+              <div className="flex flex-col gap-3">
+                <h2 className="text-sm font-semibold text-foreground">Test History</h2>
+                <StaggerList className="flex flex-col gap-2">
+                  {testResults.map(r => (
+                    <StaggerItem key={r.result_id}>
+                      <TestResultRow result={r} />
+                    </StaggerItem>
+                  ))}
+                </StaggerList>
+              </div>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+
+      <AnimatePresence>
+        {showArchiveModal && (
+          <ArchiveModal
+            courseName={course.name}
+            onConfirm={handleArchive}
+            onCancel={() => setShowArchiveModal(false)}
+          />
+        )}
+      </AnimatePresence>
+    </>
   )
 }

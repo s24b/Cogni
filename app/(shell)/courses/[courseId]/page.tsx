@@ -1,5 +1,6 @@
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
+import { readWikiFile } from '@/lib/wiki'
 import { CourseDetailClient } from './_client'
 
 export default async function CourseDetailPage({ params }: { params: Promise<{ courseId: string }> }) {
@@ -12,13 +13,14 @@ export default async function CourseDetailPage({ params }: { params: Promise<{ c
   const service = createServiceClient()
   const today = new Date().toISOString().split('T')[0]
 
-  const [courseResult, resultsResult] = await Promise.all([
+  const [courseResult, resultsResult, materialsResult] = await Promise.all([
     service
       .from('courses')
       .select(`
         course_id,
         name,
         course_type,
+        professor_id,
         professors ( name ),
         topics (
           topic_id,
@@ -40,6 +42,13 @@ export default async function CourseDetailPage({ params }: { params: Promise<{ c
       .eq('course_id', courseId)
       .order('created_at', { ascending: false })
       .limit(20),
+    service
+      .from('materials')
+      .select('material_id, tier, file_type, filename, processing_status, uploaded_at')
+      .eq('course_id', courseId)
+      .eq('user_id', user.id)
+      .order('tier', { ascending: true })
+      .order('uploaded_at', { ascending: false }),
   ])
 
   if (!courseResult.data) redirect('/courses')
@@ -74,14 +83,23 @@ export default async function CourseDetailPage({ params }: { params: Promise<{ c
     course_id: c.course_id,
     name: c.name,
     course_type: c.course_type ?? null,
+    professor_id: c.professor_id ?? null,
     professor_name: profName,
     topics,
+  }
+
+  // Fetch professor wiki summary
+  let professorWiki: string | null = null
+  if (c.professor_id) {
+    professorWiki = await readWikiFile(user.id, `professor_${c.professor_id}.md`)
   }
 
   return (
     <CourseDetailClient
       course={course}
       testResults={resultsResult.data ?? []}
+      materials={materialsResult.data ?? []}
+      professorWiki={professorWiki}
     />
   )
 }

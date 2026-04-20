@@ -318,11 +318,19 @@ Return JSON only: {"score": 0.0-1.0, "correct": true/false, "feedback": "one sen
     // Blend: masteryWeight controls how much the new score counts
     const blended = existing ? oldScore * (1 - masteryWeight) + newScore * masteryWeight : newScore
 
+    const finalScore = Math.min(1, Math.max(0, blended))
+
     await service.from('topic_mastery').upsert({
       user_id: userId,
       topic_id: topic.topic_id,
-      mastery_score: Math.min(1, Math.max(0, blended)),
+      mastery_score: finalScore,
     }, { onConflict: 'user_id,topic_id' })
+
+    await service.from('mastery_history').insert({
+      user_id: userId,
+      topic_id: topic.topic_id,
+      mastery_score: finalScore,
+    })
 
     masteryUpdates.push({ topic_id: topic.topic_id, topicName, oldScore, newScore: blended })
   }

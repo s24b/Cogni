@@ -32,7 +32,9 @@ export async function classifyMaterial(
   materialId: string,
   storagePath: string,
   filename: string,
-  fileType: string
+  fileType: string,
+  context?: string,
+  forceCourseId?: string,
 ): Promise<ClassifyResult> {
   const service = createServiceClient()
 
@@ -66,6 +68,14 @@ export async function classifyMaterial(
 
   const courseList = (courses ?? []).map((c: { course_id: string; name: string }) => `- ${c.name} (id: ${c.course_id})`).join('\n')
 
+  // If course is pre-assigned (uploaded directly to a course), skip classification
+  if (forceCourseId) {
+    await service.from('materials').update({ processing_status: 'processed', course_id: forceCourseId, tier: null }).eq('material_id', materialId)
+    await service.from('inbox_items').update({ classification_status: 'classified', course_id: forceCourseId, tier: null }).eq('material_id', materialId)
+    await appendToLog(userId, `Inbox: "${filename}" assigned directly to course ${forceCourseId}`)
+    return { courseId: forceCourseId, tier: 4, status: 'classified' }
+  }
+
   const client = new Anthropic({ apiKey })
 
   const message = await client.messages.create({
@@ -80,7 +90,7 @@ Student's courses:
 ${courseList || '(no courses)'}
 
 Document filename: ${filename}
-Document content (first 12000 chars):
+${context ? `User context: ${context}\n` : ''}Document content (first 12000 chars):
 ${content}
 
 Classify this document:

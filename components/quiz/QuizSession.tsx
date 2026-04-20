@@ -753,6 +753,11 @@ export function QuizSession({ courseId, courseName, topicOptions, initialQuestio
       setSummary(data)
       setPhase('results')
       onComplete?.(data)
+      // Trigger intraday scheduler rerun after simulated exam so the study
+      // plan updates immediately for remaining days before the actual exam.
+      if (examMode) {
+        fetch('/api/agents/scheduler/rerun', { method: 'POST' }).catch(() => {})
+      }
     } catch {
       setSummary({ correctCount: 0, scorePct: 0, missedTopics: [], masteryUpdates: [] })
       setPhase('results')

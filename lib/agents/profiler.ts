@@ -57,6 +57,43 @@ Respond with exactly: {"topics":[{"name":"...","syllabus_order":1},{"name":"..."
   }
 }
 
+async function extractProfessorProfile(
+  client: Anthropic,
+  professorName: string,
+  courseName: string,
+  syllabusText: string,
+  existingWiki: string | null,
+): Promise<string> {
+  const message = await client.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 1024,
+    messages: [
+      {
+        role: 'user',
+        content: `You are building a professor profile wiki file for a student's AI study system.
+
+Professor: ${professorName}
+Course: ${courseName}
+${existingWiki ? `\nExisting profile (update and expand, do not lose data):\n${existingWiki}\n` : ''}
+Syllabus:
+${syllabusText.slice(0, 10000)}
+
+Extract everything that reveals this professor's patterns, priorities, and style. Write a concise markdown wiki file covering:
+
+1. **Grading breakdown** — exact weights if listed (exams, homework, participation, etc.)
+2. **Exam style** — number of exams, format (MC, short answer, essay, problems), any stated policies
+3. **Topic emphasis** — which topics get the most coverage or grade weight
+4. **Stated policies** — late work, attendance, collaboration, make-up exams
+5. **Teaching style signals** — anything revealing about how this professor approaches the subject
+
+Be specific and factual — only write what the syllabus actually says. Do not invent patterns. Use markdown headers. Keep it under 400 words.`,
+      },
+    ],
+  })
+
+  return message.content[0].type === 'text' ? message.content[0].text.trim() : ''
+}
+
 async function buildLearningProfile(userId: string): Promise<string> {
   const service = createServiceClient()
 
@@ -128,7 +165,7 @@ export async function runProfiler(
   userId: string,
   materialId: string,
   courseId: string,
-  courseName: string
+  courseName: string,
 ): Promise<void> {
   const tag = `[profiler ${courseName}]`
   const service = createServiceClient()
@@ -237,7 +274,39 @@ export async function runProfiler(
     )
   }
 
-  // Update wiki
+  // Fetch professor info for this course
+  const { data: courseRow } = await service
+    .from('courses')
+    .select('professor_id, professors ( name )')
+    .eq('course_id', courseId)
+    .single()
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const professorId = courseRow?.professor_id as string | null
+  const professorName = professorId
+    ? (Array.isArray(courseRow?.professors)
+        ? (courseRow.professors[0] as { name: string } | undefined)?.name
+        : (courseRow?.professors as { name: string } | null)?.name) ?? null
+    : null
+
+  // Build professor wiki from syllabus
+  let professorWikiWrite: Promise<void> | null = null
+  if (professorId && professorName) {
+    const wikiFilename = `professor_${professorId}.md`
+    const existing = await readWikiFile(userId, wikiFilename)
+    const professorProfile = await extractProfessorProfile(
+      client,
+      professorName,
+      courseName,
+      syllabusText,
+      existing,
+    )
+    if (professorProfile) {
+      professorWikiWrite = writeWikiFile(userId, wikiFilename, professorProfile, 'profiler')
+    }
+  }
+
+  // Update general wiki
   const [profile, weakAreas] = await Promise.all([
     buildLearningProfile(userId),
     buildWeakAreas(userId),
@@ -246,6 +315,7 @@ export async function runProfiler(
   await Promise.all([
     writeWikiFile(userId, 'learning_profile.md', profile, 'profiler'),
     writeWikiFile(userId, 'weak_areas.md', weakAreas, 'profiler'),
-    appendToLog(userId, `Profiler extracted ${newTopics.length} topics from "${material.filename}" for ${courseName}`),
+    appendToLog(userId, `Profiler extracted ${newTopics.length} topics from "${material.filename}" for ${courseName}${professorName ? ` · updated ${professorName}'s profile` : ''}`),
+    ...(professorWikiWrite ? [professorWikiWrite] : []),
   ])
 }
