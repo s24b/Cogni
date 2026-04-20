@@ -163,9 +163,9 @@ export async function runScheduler(userId: string): Promise<void> {
 
   const { data: assignments } = await service
     .from('assignments')
-    .select('assignment_id, title, due_date, course_id')
+    .select('assignment_id, name, due_date, course_id')
     .eq('user_id', userId)
-    .eq('status', 'pending')
+    .eq('completion_status', 'pending')
     .lt('due_date', tomorrowStr)
     .order('due_date', { ascending: true })
 
@@ -179,7 +179,7 @@ export async function runScheduler(userId: string): Promise<void> {
       course_id: a.course_id,
       course_name: courseNameMap[a.course_id] ?? '',
       assignment_id: a.assignment_id,
-      title: a.title,
+      title: a.name,
       due_date: a.due_date,
       overdue: a.due_date < today,
       order: hwOrder++,

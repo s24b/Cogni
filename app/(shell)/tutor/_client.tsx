@@ -24,6 +24,7 @@ import {
   Paperclip,
   Globe,
   X,
+  Trash,
   CheckCircle,
   WarningCircle,
   MinusCircle,
@@ -401,6 +402,22 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
     })
   }
 
+  async function deleteSession(sessionId: string) {
+    try {
+      await fetch(`/api/agents/tutor/sessions?sessionId=${sessionId}`, { method: 'DELETE' })
+    } catch { /* non-critical */ }
+    setSessions(prev => prev.filter(s => s.session_id !== sessionId))
+    // If the deleted session is currently active, return to course picker
+    if (activeSessionId === sessionId) {
+      setActiveCourse(null)
+      setActiveSessionId(null)
+      setMessages([])
+      setAttachments([])
+      setSplitContent(null)
+      setSplitExpanded(false)
+    }
+  }
+
   function changeMode(newMode: Mode) {
     if (newMode === mode) return
     setMode(newMode)
@@ -706,20 +723,27 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
             <StaggerList className="flex flex-col gap-2">
               {sessions.slice(0, 5).map(session => (
                 <StaggerItem key={session.session_id}>
-                  <motion.button
-                    onClick={() => loadSession(session)}
-                    className="flex w-full items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 text-left hover:bg-muted/30 transition-colors"
-                    whileTap={{ scale: 0.99 }}
-                    transition={{ duration: 0.1 }}
-                  >
-                    <ChatCircle size={16} className="shrink-0 text-muted-foreground" />
-                    <div className="flex flex-1 flex-col min-w-0">
-                      <span className="truncate text-sm text-foreground">{session.name ?? 'Unnamed session'}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {courses.find(c => c.course_id === session.course_id)?.name ?? ''}
-                      </span>
-                    </div>
-                  </motion.button>
+                  <div className="group flex items-center gap-2 rounded-xl border border-border bg-card hover:bg-muted/30 transition-colors">
+                    <button
+                      onClick={() => loadSession(session)}
+                      className="flex flex-1 items-center gap-3 px-4 py-3 text-left min-w-0"
+                    >
+                      <ChatCircle size={16} className="shrink-0 text-muted-foreground" />
+                      <div className="flex flex-1 flex-col min-w-0">
+                        <span className="truncate text-sm text-foreground">{session.name ?? 'Unnamed session'}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {courses.find(c => c.course_id === session.course_id)?.name ?? ''}
+                        </span>
+                      </div>
+                    </button>
+                    <button
+                      onClick={e => { e.stopPropagation(); deleteSession(session.session_id) }}
+                      className="mr-2 flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30 transition-all"
+                      title="Delete session"
+                    >
+                      <Trash size={13} />
+                    </button>
+                  </div>
                 </StaggerItem>
               ))}
             </StaggerList>
@@ -758,13 +782,24 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
               </span>
             )
           })()}
-          <button
-            onClick={() => startNewSession(activeCourse)}
-            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors justify-self-end"
-          >
-            <Plus size={12} weight="bold" />
-            New
-          </button>
+          <div className="flex items-center gap-2 justify-self-end">
+            {activeSessionId && (
+              <button
+                onClick={() => deleteSession(activeSessionId)}
+                className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30 transition-colors"
+                title="Delete this session"
+              >
+                <Trash size={14} />
+              </button>
+            )}
+            <button
+              onClick={() => startNewSession(activeCourse)}
+              className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+            >
+              <Plus size={12} weight="bold" />
+              New
+            </button>
+          </div>
         </div>
 
         {/* Messages */}
