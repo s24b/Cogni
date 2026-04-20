@@ -22,11 +22,49 @@ Never ask calibration questions that the context has already answered. One well-
 **Adaptive explanations (Focus mode):** Same as Teach — when a student asks you to explain a concept, ask ONE calibration question first to tailor your response, unless the wiki, mastery scores, uploaded files, or the conversation itself already tell you what they know. Use that context to calibrate depth and framing, not to ask what you already know. Skip calibration and explain at the appropriate level when the evidence is clear.`,
 }
 
+export type AssistanceLevel = 'feedback' | 'suggest' | 'assist'
+
+const COURSE_TYPE_ESSAY_FOCUS: Record<string, string> = {
+  humanities: 'Focus on argumentation, thesis strength, evidence use, and citation style.',
+  social_science: 'Focus on research framing, methodology clarity, and data interpretation.',
+  quantitative: 'Focus on technical precision, logical structure, and clarity of proof or derivation.',
+  professional: 'Focus on technical precision, logical structure, and clarity of proof or derivation.',
+  conceptual_science: 'Focus on general academic writing: structure, clarity, and argument coherence.',
+  language: 'Focus on general academic writing: structure, clarity, and argument coherence.',
+}
+
+function buildEssaySection(level: AssistanceLevel, courseType?: string): string {
+  const focus = courseType ? (COURSE_TYPE_ESSAY_FOCUS[courseType] ?? COURSE_TYPE_ESSAY_FOCUS.conceptual_science) : 'Focus on general academic writing: structure, clarity, and argument coherence.'
+
+  const levelRules =
+    level === 'feedback'
+      ? `**Feedback Only** — NEVER call suggest_edit. Your job is to ask questions and give verbal feedback only. Be Socratic: ask "What are you arguing here?" or "How does this support your thesis?" before explaining anything. Guide the student to their own improvements.`
+      : level === 'suggest'
+      ? `**Suggest** — Give direct, clear feedback in chat. You may call suggest_edit to propose tracked changes, but only after the student has written at least one paragraph. Maximum 2 new sentences per suggest_edit call.`
+      : `**Full Assist** — Be direct and efficient. Give clear feedback and call suggest_edit freely for broader structural edits. Maximum 1 paragraph per suggest_edit call. Tell the student exactly what to fix and why.`
+
+  return `
+## Essay mode
+The student is writing an essay. The current essay content is injected at the top of each message as [Current essay content].
+
+${focus}
+
+**Assistance level (this controls both your chat style AND editing permissions):**
+${levelRules}
+
+**Guardrails:**
+- The student must have written at least one paragraph before you call suggest_edit.
+- If asked to write on a blank page, decline: "What point are you trying to make here? Let's build it together."
+- Never write an entire essay section unprompted.
+- Ignore the Answer/Teach/Focus mode in essay mode — the assistance level above governs everything.`
+}
+
 export async function buildTutorSystemPrompt(
   userId: string,
   courseId: string,
   courseName: string,
-  mode: TutorMode
+  mode: TutorMode,
+  opts?: { essayMode?: boolean; assistanceLevel?: AssistanceLevel; courseType?: string }
 ): Promise<string> {
   const service = createServiceClient()
 
@@ -50,6 +88,18 @@ export async function buildTutorSystemPrompt(
     .filter(Boolean)
     .join('\n')
 
+  const verificationSection = mode !== 'answer' ? `
+## Verification questions
+When a student expresses uncertainty about a topic despite appearing to understand it, ask ONE clear professor-style question in your response text to check their actual grasp. When the student answers that question in their next message, call grade_answer with a score 0.0–1.0:
+- 0.0–0.3: poor understanding — tell the student plainly and re-explain
+- 0.4–0.6: partial understanding — identify exactly what's missing
+- 0.7–1.0: strong understanding — acknowledge it and explore why they felt uncertain
+Only call grade_answer when you explicitly posed a verification question and the student has answered it.` : `
+## Answer mode — no verification questions
+Do NOT ask verification or check-your-understanding questions. The student wants direct answers. Just answer clearly and move on.`
+
+  const essaySection = opts?.essayMode ? buildEssaySection(opts.assistanceLevel ?? 'suggest', opts.courseType) : ''
+
   return `You are a tutor helping a student study ${courseName}. You have access to their course materials and mastery data.
 
 ## Behaviour
@@ -66,13 +116,7 @@ ${MODE_INSTRUCTIONS[mode]}
 ## Context
 ${learningProfile ?? ''}
 ${weakTopics ? `\nCurrent weak areas:\n${weakTopics}` : ''}
-
-## Verification questions
-When a student expresses uncertainty about a topic despite appearing to understand it, ask ONE clear professor-style question in your response text to check their actual grasp. When the student answers that question in their next message, call grade_answer with a score 0.0–1.0:
-- 0.0–0.3: poor understanding — tell the student plainly and re-explain
-- 0.4–0.6: partial understanding — identify exactly what's missing
-- 0.7–1.0: strong understanding — acknowledge it and explore why they felt uncertain
-Only call grade_answer when you explicitly posed a verification question and the student has answered it.
+${verificationSection}
 
 ## Wiki patterns
 Call write_wiki_pattern ONLY when you observe a durable, non-obvious pattern about how this student learns — something genuinely useful for future sessions. Examples: a systematic misconception that keeps recurring, a topic they struggle with despite repeated practice, a learning approach they've expressed. Do NOT write for routine interactions. Quality over quantity.
@@ -86,8 +130,9 @@ Always prefer course materials first. Only search for information directly relev
 ## Guardrails
 - Only answer questions about ${courseName}. Accept common abbreviations, full names, and synonyms (e.g. "calc" and "Calculus" are the same). For a clearly unrelated course: "I'm focused on ${courseName} right now. Switch courses to discuss that."
 - If a question references material not in the uploaded files, say so. Do not invent content.
-- Do not write essays or assignments for the student.
-- Current mode: ${mode}`
+- When a student asks for help with an essay or paper, immediately call open_essay_mode — do not refuse. You help them write, you do not ghostwrite for them. The distinction is made inside essay mode.
+- Current mode: ${mode}
+${essaySection}`
 }
 
 export async function createSession(
@@ -133,7 +178,7 @@ export async function listUserSessions(userId: string) {
   const service = createServiceClient()
   const { data } = await service
     .from('session_log')
-    .select('session_id, course_id, name, mode, created_at')
+    .select('session_id, course_id, name, mode, created_at, essay_content')
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
     .limit(50)

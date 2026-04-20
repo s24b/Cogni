@@ -64,6 +64,8 @@ export async function POST(request: Request) {
     sessionId?: string
     forceNew?: boolean
     attachments?: Attachment[]
+    essayContent?: string
+    assistanceLevel?: 'feedback' | 'suggest' | 'assist'
   }
 
   const {
@@ -75,6 +77,8 @@ export async function POST(request: Request) {
     sessionId: existingSessionId,
     forceNew = false,
     attachments = [],
+    essayContent,
+    assistanceLevel = 'suggest',
   } = body
 
   if (!courseId || !message?.trim()) {
@@ -94,14 +98,31 @@ export async function POST(request: Request) {
       : await getOrCreateSession(user.id, courseId, mode))
   await saveMessage(sessionId, user.id, 'user', message)
 
+  const service2 = createServiceClient()
+  const { data: courseRow } = await service2
+    .from('courses')
+    .select('course_type')
+    .eq('course_id', courseId)
+    .single()
+
   const [systemPrompt, history] = await Promise.all([
-    buildTutorSystemPrompt(user.id, courseId, courseName, mode),
+    buildTutorSystemPrompt(user.id, courseId, courseName, mode, {
+      essayMode: !!essayContent,
+      assistanceLevel,
+      courseType: courseRow?.course_type ?? undefined,
+    }),
     getSessionMessages(sessionId),
   ])
 
   const client = new Anthropic({ apiKey })
   const priorMessages = history.slice(0, -1)
-  const userContent = buildUserContent(message, attachments)
+
+  // Inject essay content as context prefix when in essay mode
+  const effectiveMessage = essayContent
+    ? `[Current essay content]\n${essayContent}\n\n[Student message]\n${message}`
+    : message
+
+  const userContent = buildUserContent(effectiveMessage, attachments)
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tools: any[] = [
@@ -165,6 +186,30 @@ export async function POST(request: Request) {
           rationale: { type: 'string', description: 'Brief explanation of the score' },
         },
         required: ['topic_name', 'score', 'rationale'],
+      },
+    },
+    {
+      name: 'open_essay_mode',
+      description: 'Open the essay writing split-screen. Call this IMMEDIATELY whenever the student mentions writing a paper, essay, report, or written assignment — even if the request sounds like ghostwriting. Do NOT refuse; open essay mode and explain you will help them develop it together. Never call create_flashcards in the same response as open_essay_mode.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          topic: { type: 'string', description: 'Brief description of the essay topic' },
+        },
+        required: ['topic'],
+      },
+    },
+    {
+      name: 'suggest_edit',
+      description: 'Propose a tracked edit to the student\'s essay. Only call when assistance is "suggest" or "assist" and the student has written at least one paragraph. Return the exact target text to replace and the replacement.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          target: { type: 'string', description: 'Exact substring of the essay to replace. Empty string to append at end.' },
+          replacement: { type: 'string', description: 'The proposed replacement text' },
+          instruction: { type: 'string', description: 'One sentence explaining what this edit does and why' },
+        },
+        required: ['target', 'replacement', 'instruction'],
       },
     },
     {
@@ -260,7 +305,15 @@ export async function POST(request: Request) {
               // web_search is handled server-side by Anthropic — skip
               if (block.name === 'web_search') continue
 
-              if (block.name === 'create_flashcards') {
+              if (block.name === 'open_essay_mode') {
+                const input = block.input as { topic: string }
+                controller.enqueue(emit({ t: 'essay_open', topic: input.topic }))
+                toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: 'Essay mode opened. Tell the student the writing space is ready.' })
+              } else if (block.name === 'suggest_edit') {
+                const input = block.input as { target: string; replacement: string; instruction: string }
+                controller.enqueue(emit({ t: 'essay_edit', target: input.target, replacement: input.replacement, instruction: input.instruction }))
+                toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: 'Edit suggested and shown to student as a tracked change.' })
+              } else if (block.name === 'create_flashcards') {
                 const input = block.input as { topic: string; cards: { front: string; back: string }[] }
                 controller.enqueue(emit({ t: 'card', kind: 'flashcards', topic: input.topic, count: input.cards.length, data: input.cards }))
                 toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: `Created ${input.cards.length} flashcards on "${input.topic}". Tell the student they're ready.` })

@@ -11,6 +11,27 @@ export async function GET() {
   return NextResponse.json({ sessions })
 }
 
+export async function PATCH(request: Request) {
+  const { searchParams } = new URL(request.url)
+  const sessionId = searchParams.get('sessionId')
+  if (!sessionId) return NextResponse.json({ error: 'Missing sessionId' }, { status: 400 })
+
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const { essay_content } = await request.json() as { essay_content: string }
+
+  const service = createServiceClient()
+  await service
+    .from('session_log')
+    .update({ essay_content, updated_at: new Date().toISOString() })
+    .eq('session_id', sessionId)
+    .eq('user_id', user.id)
+
+  return NextResponse.json({ ok: true })
+}
+
 export async function DELETE(request: Request) {
   const { searchParams } = new URL(request.url)
   const sessionId = searchParams.get('sessionId')

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import ReactMarkdown from 'react-markdown'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
@@ -8,6 +8,7 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
+import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from 'react-resizable-panels'
 import {
   PaperPlaneRight,
   Microphone,
@@ -28,14 +29,17 @@ import {
   CheckCircle,
   WarningCircle,
   MinusCircle,
+  PencilSimple,
 } from '@phosphor-icons/react'
 import { StaggerList, StaggerItem, ease } from '@/components/ui/motion'
 import { BorderBeam } from 'border-beam'
+import { EssayEditor, applyEdit, type AssistanceLevel, type SuggestedEdit } from '@/components/essay/EssayEditor'
+import type { Editor } from '@tiptap/react'
 
 type Course = { course_id: string; name: string; professors: { name: string }[] | { name: string } | null }
-type Session = { session_id: string; course_id: string; name: string | null; mode: string; created_at: string }
+type Session = { session_id: string; course_id: string; name: string | null; mode: string; created_at: string; essay_content?: string | null }
 type Mode = 'answer' | 'teach' | 'focus'
-type InlineCard = { type: 'flashcards' | 'quiz'; count: number; topic: string; data?: object[] }
+type InlineCard = { type: 'flashcards' | 'quiz' | 'essay'; count: number; topic: string; data?: object[] }
 type LocalAttachment = { name: string; type: string; data: string; preview?: string }
 type GradeResult = { score: number; rationale: string; topic: string }
 type Message = {
@@ -50,6 +54,7 @@ type Message = {
   grade?: GradeResult
   attachments?: LocalAttachment[]
 }
+type EssayState = { open: boolean; topic: string }
 
 const MODES: { value: Mode; label: string; Icon: React.ElementType; tip: string; description: string }[] = [
   {
@@ -86,15 +91,20 @@ function InlineCardChip({ card, onExpand }: { card: InlineCard; onExpand: () => 
       className="mt-2 flex items-center gap-3 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2.5"
     >
       <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10">
-        <Cards size={15} className="text-primary" weight="fill" />
+        {card.type === 'essay'
+          ? <PencilSimple size={15} className="text-primary" weight="fill" />
+          : <Cards size={15} className="text-primary" weight="fill" />
+        }
       </div>
       <div className="flex flex-1 flex-col">
         <span className="text-xs font-semibold text-foreground">
-          {card.type === 'flashcards'
+          {card.type === 'essay'
+            ? `Essay — ${card.topic}`
+            : card.type === 'flashcards'
             ? `${card.count} flashcards — ${card.topic}`
             : `Quiz — ${card.topic} (${card.count} questions)`}
         </span>
-        <span className="text-[10px] text-muted-foreground">Tap to expand</span>
+        <span className="text-[10px] text-muted-foreground">{card.type === 'essay' ? 'Tap to open essay editor' : 'Tap to expand'}</span>
       </div>
       <button
         onClick={onExpand}
@@ -338,6 +348,21 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
   const [showOptions, setShowOptions] = useState(false)
   const [attachments, setAttachments] = useState<LocalAttachment[]>([])
   const [loadingMessages, setLoadingMessages] = useState(false)
+  const [essay, setEssay] = useState<EssayState>({ open: false, topic: '' })
+  const [essayText, setEssayText] = useState('')
+  const [essayHtml, setEssayHtml] = useState('')
+  const [essayInitialContent, setEssayInitialContent] = useState<string | undefined>(undefined)
+  const [assistance, setAssistance] = useState<AssistanceLevel>('suggest')
+  // chatPct: percentage of horizontal space the chat panel takes in essay split
+  const [chatPct, setChatPct] = useState(25)
+  const [isDragging, setIsDragging] = useState(false)
+  const splitContainerRef = useRef<HTMLDivElement>(null)
+  // cardChatPct: percentage of horizontal space the chat panel takes in flashcard/quiz split
+  const [cardChatPct, setCardChatPct] = useState(38)
+  const [cardIsDragging, setCardIsDragging] = useState(false)
+  const cardSplitContainerRef = useRef<HTMLDivElement>(null)
+  const essayEditorRef = useRef<Editor | null>(null)
+  const essaySaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const forceNewRef = useRef(false)
   const messagesRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -349,6 +374,59 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
     if (!el) return
     el.scrollTop = el.scrollHeight
   }, [messages])
+
+  // Debounced essay autosave
+  useEffect(() => {
+    if (!essay.open || !activeSessionId || !essayHtml) return
+    if (essaySaveTimerRef.current) clearTimeout(essaySaveTimerRef.current)
+    essaySaveTimerRef.current = setTimeout(() => {
+      fetch(`/api/agents/tutor/sessions?sessionId=${activeSessionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ essay_content: essayHtml }),
+      }).catch(() => {})
+    }, 1500)
+    return () => {
+      if (essaySaveTimerRef.current) clearTimeout(essaySaveTimerRef.current)
+    }
+  }, [essayHtml, essay.open, activeSessionId])
+
+  // Essay split drag-to-resize
+  function handleDividerMouseDown(e: React.MouseEvent) {
+    e.preventDefault()
+    setIsDragging(true)
+    function onMove(ev: MouseEvent) {
+      if (!splitContainerRef.current) return
+      const rect = splitContainerRef.current.getBoundingClientRect()
+      const pct = Math.round(((ev.clientX - rect.left) / rect.width) * 100)
+      setChatPct(Math.max(20, Math.min(75, pct)))
+    }
+    function onUp() {
+      setIsDragging(false)
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
+
+  function handleCardDividerMouseDown(e: React.MouseEvent) {
+    e.preventDefault()
+    setCardIsDragging(true)
+    function onMove(ev: MouseEvent) {
+      if (!cardSplitContainerRef.current) return
+      const rect = cardSplitContainerRef.current.getBoundingClientRect()
+      const pct = Math.round(((ev.clientX - rect.left) / rect.width) * 100)
+      setCardChatPct(Math.max(20, Math.min(75, pct)))
+    }
+    function onUp() {
+      setCardIsDragging(false)
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
 
   // Close options panel on click outside
   useEffect(() => {
@@ -415,6 +493,9 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
       setAttachments([])
       setSplitContent(null)
       setSplitExpanded(false)
+      setEssay({ open: false, topic: '' })
+      setEssayText('')
+      setEssayHtml('')
     }
   }
 
@@ -435,6 +516,9 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
     setAttachments([])
     setSplitContent(null)
     setSplitExpanded(false)
+    setEssay({ open: false, topic: '' })
+    setEssayText('')
+    setEssayHtml('')
     forceNewRef.current = false
   }
 
@@ -466,6 +550,16 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
     setSplitContent(null)
     setSplitExpanded(false)
     setLoadingMessages(true)
+    if (session.essay_content) {
+      setEssayInitialContent(session.essay_content)
+      setEssayText(session.essay_content)
+      setEssay({ open: true, topic: session.name ?? '' })
+    } else {
+      setEssay({ open: false, topic: '' })
+      setEssayText('')
+      setEssayHtml('')
+      setEssayInitialContent(undefined)
+    }
 
     // Fetch stored messages for this session
     try {
@@ -514,6 +608,8 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
           sessionId: activeSessionId,
           forceNew: wasForceNew,
           attachments: sentAttachments.map(a => ({ name: a.name, type: a.type, data: a.data })),
+          essayContent: essay.open ? essayText : undefined,
+          assistanceLevel: essay.open ? assistance : undefined,
         }),
       })
 
@@ -558,13 +654,16 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
                 t: string; c?: string; q?: string
                 kind?: 'flashcards' | 'quiz'; topic?: string; count?: number; data?: object[]
                 score?: number; rationale?: string
+                target?: string; replacement?: string; instruction?: string
               }
 
               if (event.t === 'text' && event.c) {
                 accumulated += event.c
                 setMessages(prev => {
                   const updated = [...prev]
+                  const last = updated[updated.length - 1]
                   updated[updated.length - 1] = {
+                    ...last,
                     role: 'assistant',
                     content: accumulated,
                     streaming: true,
@@ -614,6 +713,27 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
                   return updated
                 })
                 setSplitContent(cardPayload)
+              } else if (event.t === 'essay_open' && event.topic) {
+                const topic = event.topic
+                setEssay({ open: true, topic })
+                setChatPct(25)
+                cardPayload = { type: 'essay', topic, count: 0 }
+                setMessages(prev => {
+                  const updated = [...prev]
+                  updated[updated.length - 1] = {
+                    ...updated[updated.length - 1],
+                    inlineCard: cardPayload,
+                  }
+                  return updated
+                })
+              } else if (event.t === 'essay_edit') {
+                const edit: SuggestedEdit = {
+                  target: event.target ?? '',
+                  replacement: event.replacement ?? '',
+                }
+                if (essayEditorRef.current) {
+                  applyEdit(essayEditorRef.current, edit)
+                }
               } else if (event.t === 'grade' && event.score !== undefined) {
                 gradeResult = {
                   score: event.score,
@@ -671,6 +791,62 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
       sendMessage()
     }
   }
+
+  const handleCopyToClipboard = useCallback((text: string) => {
+    navigator.clipboard.writeText(text).catch(() => {})
+  }, [])
+
+  const handleExportTxt = useCallback((text: string) => {
+    const blob = new Blob([text], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${essay.topic || 'essay'}.txt`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [essay.topic])
+
+  const handleExportMd = useCallback((text: string) => {
+    const blob = new Blob([text], { type: 'text/markdown' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${essay.topic || 'essay'}.md`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [essay.topic])
+
+  const handleExportDocx = useCallback(async (html: string) => {
+    const res = await fetch('/api/export/docx', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ html, title: essay.topic || 'Essay' }),
+    })
+    if (!res.ok) return
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${essay.topic || 'essay'}.docx`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [essay.topic])
+
+  const handleExportPdf = useCallback(async (html: string) => {
+    const res = await fetch('/api/export/pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ html, title: essay.topic || 'Essay' }),
+    })
+    if (!res.ok) return
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${essay.topic || 'essay'}.pdf`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [essay.topic])
 
   function startVoice() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -753,16 +929,9 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
     )
   }
 
-  // ── Active session ────────────────────────────────────────────────────────
-  return (
-    <div className="flex h-full overflow-hidden">
-      {/* Chat panel */}
-      <motion.div
-        className="flex h-full min-h-0 flex-col overflow-hidden"
-        animate={{ width: splitExpanded ? '38%' : '100%' }}
-        transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-        style={{ minWidth: 0 }}
-      >
+  // ── Chat panel (shared between regular and essay layouts) ────────────────
+  const chatPanel = (
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
         {/* Header */}
         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 border-b border-border px-4 py-3">
           <div className="flex min-w-0 items-center gap-3">
@@ -774,7 +943,12 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
             </button>
             <span className="truncate text-sm font-semibold text-foreground">{activeCourse.name}</span>
           </div>
-          {(() => {
+          {essay.open ? (
+            <span className="justify-self-center flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-[11px] font-medium text-primary">
+              <PencilSimple size={11} weight="fill" />
+              Essay Mode
+            </span>
+          ) : (() => {
             const m = MODES.find(m => m.value === mode)!
             return (
               <span className="justify-self-center rounded-full bg-muted px-3 py-1 text-[11px] font-medium text-muted-foreground">
@@ -871,7 +1045,17 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
                       </div>
                     )}
                     {msg.inlineCard && (
-                      <InlineCardChip card={msg.inlineCard} onExpand={() => setSplitExpanded(true)} />
+                      <InlineCardChip
+                        card={msg.inlineCard}
+                        onExpand={() => {
+                          if (msg.inlineCard?.type === 'essay') {
+                            setEssay(prev => ({ ...prev, open: true }))
+                            setChatPct(35)
+                          } else {
+                            setSplitExpanded(true)
+                          }
+                        }}
+                      />
                     )}
                     {msg.grade && (
                       <GradeBlock grade={msg.grade} />
@@ -942,33 +1126,35 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
                       </div>
                     </button>
 
-                    <div className="my-3 h-px bg-border" />
+                    {!essay.open && <div className="my-3 h-px bg-border" />}
 
-                    <p className="mb-2 px-1 text-xs font-medium text-muted-foreground">Mode</p>
-                    <div className="flex flex-col gap-1">
-                      {MODES.map(m => (
-                        <button
-                          key={m.value}
-                          onClick={() => { changeMode(m.value); setShowOptions(false) }}
-                          className={`flex items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors ${
-                            mode === m.value ? 'bg-primary/10' : 'hover:bg-muted/40'
-                          }`}
-                        >
-                          <div className={`flex size-7 items-center justify-center rounded-lg ${mode === m.value ? 'bg-primary/10' : 'bg-muted'}`}>
-                            <m.Icon
-                              size={13}
-                              weight={mode === m.value ? 'fill' : 'regular'}
-                              className={mode === m.value ? 'text-primary' : 'text-muted-foreground'}
-                            />
-                          </div>
-                          <div className="flex flex-col">
-                            <span className={`text-xs font-semibold ${mode === m.value ? 'text-primary' : 'text-foreground'}`}>{m.label}</span>
-                            <span className="text-[11px] text-muted-foreground">{m.tip}</span>
-                          </div>
-                          {mode === m.value && <div className="ml-auto size-2 rounded-full bg-primary" />}
-                        </button>
-                      ))}
-                    </div>
+                    {!essay.open && <p className="mb-2 px-1 text-xs font-medium text-muted-foreground">Mode</p>}
+                    {!essay.open && (
+                      <div className="flex flex-col gap-1">
+                        {MODES.map(m => (
+                          <button
+                            key={m.value}
+                            onClick={() => { changeMode(m.value); setShowOptions(false) }}
+                            className={`flex items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors ${
+                              mode === m.value ? 'bg-primary/10' : 'hover:bg-muted/40'
+                            }`}
+                          >
+                            <div className={`flex size-7 items-center justify-center rounded-lg ${mode === m.value ? 'bg-primary/10' : 'bg-muted'}`}>
+                              <m.Icon
+                                size={13}
+                                weight={mode === m.value ? 'fill' : 'regular'}
+                                className={mode === m.value ? 'text-primary' : 'text-muted-foreground'}
+                              />
+                            </div>
+                            <div className="flex flex-col">
+                              <span className={`text-xs font-semibold ${mode === m.value ? 'text-primary' : 'text-foreground'}`}>{m.label}</span>
+                              <span className="text-[11px] text-muted-foreground">{m.tip}</span>
+                            </div>
+                            {mode === m.value && <div className="ml-auto size-2 rounded-full bg-primary" />}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -1049,17 +1235,96 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
             </div>
           </div>
         </div>
+    </div>
+  )
+
+  // ── Active session ────────────────────────────────────────────────────────
+  // Essay mode: custom animated + draggable split
+  if (essay.open) {
+    const essayPct = 100 - chatPct
+    const noTransition = isDragging ? 'none' : 'width 380ms cubic-bezier(0.22, 1, 0.36, 1)'
+    return (
+      <div
+        ref={splitContainerRef}
+        className={`flex h-full overflow-hidden${isDragging ? ' select-none cursor-col-resize' : ''}`}
+      >
+        {/* Chat panel — animates from 100% → chatPct% on first open */}
+        <motion.div
+          className="flex flex-col overflow-hidden"
+          initial={{ width: '100%' }}
+          animate={{ width: `${chatPct}%` }}
+          transition={{ duration: isDragging ? 0 : 0.38, ease: [0.22, 1, 0.36, 1] }}
+          style={{ minWidth: 0, flexShrink: 0 }}
+        >
+          {chatPanel}
+        </motion.div>
+
+        {/* Draggable divider */}
+        <div
+          className="w-1 shrink-0 bg-border hover:bg-primary/40 active:bg-primary/60 transition-colors cursor-col-resize"
+          style={{ transition: noTransition === 'none' ? 'none' : undefined }}
+          onMouseDown={handleDividerMouseDown}
+        />
+
+        {/* Essay panel — slides in from right */}
+        <motion.div
+          className="flex flex-col overflow-hidden"
+          initial={{ width: 0, opacity: 0 }}
+          animate={{ width: `${essayPct}%`, opacity: 1 }}
+          transition={{ duration: isDragging ? 0 : 0.38, ease: [0.22, 1, 0.36, 1] }}
+          style={{ minWidth: 0 }}
+        >
+          <EssayEditor
+            key={essayInitialContent ?? 'new'}
+            initialContent={essayInitialContent}
+            assistance={assistance}
+            onAssistanceChange={setAssistance}
+            onContentChange={(text, html) => { setEssayText(text); setEssayHtml(html) }}
+            onCopyToClipboard={handleCopyToClipboard}
+            onExportTxt={handleExportTxt}
+            onExportMd={handleExportMd}
+            onExportDocx={handleExportDocx}
+            onExportPdf={handleExportPdf}
+            onClose={() => setEssay(prev => ({ ...prev, open: false }))}
+            editorRef={e => { essayEditorRef.current = e }}
+          />
+        </motion.div>
+      </div>
+    )
+  }
+
+  // Regular mode: flashcard/quiz split with draggable divider
+  return (
+    <div
+      ref={cardSplitContainerRef}
+      className={`flex h-full overflow-hidden${cardIsDragging ? ' select-none cursor-col-resize' : ''}`}
+    >
+      <motion.div
+        className="flex h-full min-h-0 flex-col overflow-hidden"
+        animate={{ width: splitExpanded ? `${cardChatPct}%` : '100%' }}
+        transition={{ duration: cardIsDragging ? 0 : 0.35, ease: [0.22, 1, 0.36, 1] }}
+        style={{ minWidth: 0, flexShrink: 0 }}
+      >
+        {chatPanel}
       </motion.div>
 
-      {/* Split content panel */}
+      {/* Draggable divider */}
+      {splitExpanded && (
+        <div
+          className="w-1 shrink-0 bg-border hover:bg-primary/40 cursor-col-resize transition-colors"
+          onMouseDown={handleCardDividerMouseDown}
+        />
+      )}
+
+      {/* Flashcard / quiz split panel */}
       <AnimatePresence>
         {splitExpanded && splitContent && (
           <motion.div
             key="split"
-            initial={{ opacity: 0, x: 40, width: 0 }}
-            animate={{ opacity: 1, x: 0, width: '62%' }}
-            exit={{ opacity: 0, x: 40, width: 0 }}
-            transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+            initial={{ opacity: 0, width: 0 }}
+            animate={{ opacity: 1, width: `${100 - cardChatPct}%` }}
+            exit={{ opacity: 0, width: 0 }}
+            transition={{ duration: cardIsDragging ? 0 : 0.35, ease: [0.22, 1, 0.36, 1] }}
             className="flex flex-col border-l border-border overflow-hidden"
             style={{ minWidth: 0 }}
           >
