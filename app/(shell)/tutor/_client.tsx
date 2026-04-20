@@ -282,6 +282,34 @@ function AssistantMessage({ content, streaming }: { content: string; streaming?:
   )
 }
 
+function MessageSkeleton() {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.15 }}
+      className="flex flex-col gap-6"
+    >
+      <div className="flex justify-end">
+        <div className="h-8 w-40 animate-pulse rounded-2xl bg-muted/70" />
+      </div>
+      <div className="flex max-w-[75%] flex-col gap-2">
+        <div className="h-4 w-3/4 animate-pulse rounded-lg bg-muted/70" />
+        <div className="h-4 w-2/3 animate-pulse rounded-lg bg-muted/70" />
+        <div className="h-4 w-1/2 animate-pulse rounded-lg bg-muted/70" />
+      </div>
+      <div className="flex justify-end">
+        <div className="h-8 w-28 animate-pulse rounded-2xl bg-muted/70" />
+      </div>
+      <div className="flex max-w-[75%] flex-col gap-2">
+        <div className="h-4 w-4/5 animate-pulse rounded-lg bg-muted/70" />
+        <div className="h-4 w-3/5 animate-pulse rounded-lg bg-muted/70" />
+      </div>
+    </motion.div>
+  )
+}
+
 // ── File helpers ──────────────────────────────────────────────────────────────
 
 function readAsBase64(file: File): Promise<string> {
@@ -308,6 +336,7 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
   const [splitExpanded, setSplitExpanded] = useState(false)
   const [showOptions, setShowOptions] = useState(false)
   const [attachments, setAttachments] = useState<LocalAttachment[]>([])
+  const [loadingMessages, setLoadingMessages] = useState(false)
   const forceNewRef = useRef(false)
   const messagesRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -333,14 +362,14 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
   }, [showOptions])
 
   // Auto-grow textarea (state-driven so CSS transitions fire smoothly)
-  const [taHeight, setTaHeight] = useState(48)
+  const [taHeight, setTaHeight] = useState(24)
 
   useEffect(() => {
     const el = textareaRef.current
     if (!el) return
     const prev = el.style.height
     el.style.height = 'auto'
-    const h = Math.min(Math.max(el.scrollHeight, 48), 160)
+    const h = Math.min(Math.max(el.scrollHeight, 24), 160)
     el.style.height = prev
     setTaHeight(h)
   }, [input])
@@ -419,6 +448,7 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
     setAttachments([])
     setSplitContent(null)
     setSplitExpanded(false)
+    setLoadingMessages(true)
 
     // Fetch stored messages for this session
     try {
@@ -433,6 +463,8 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
       }
     } catch {
       // non-critical — leave messages empty
+    } finally {
+      setLoadingMessages(false)
     }
   }
 
@@ -442,7 +474,7 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
     const sentAttachments = [...attachments]
     setInput('')
     setAttachments([])
-    setTaHeight(48)
+    setTaHeight(24)
     setSending(true)
 
     const userMsg: Message = { role: 'user', content: text, attachments: sentAttachments }
@@ -708,26 +740,27 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
         style={{ minWidth: 0 }}
       >
         {/* Header */}
-        <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-          <button
-            onClick={() => setActiveCourse(null)}
-            className="text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0"
-          >
-            ← Courses
-          </button>
-          <span className="flex-1 truncate text-sm font-semibold text-foreground">{activeCourse.name}</span>
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 border-b border-border px-4 py-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <button
+              onClick={() => setActiveCourse(null)}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0"
+            >
+              ← Courses
+            </button>
+            <span className="truncate text-sm font-semibold text-foreground">{activeCourse.name}</span>
+          </div>
           {(() => {
             const m = MODES.find(m => m.value === mode)!
             return (
-              <span className="flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 text-[11px] text-muted-foreground shrink-0">
-                <m.Icon size={11} weight="fill" />
-                {m.label}
+              <span className="justify-self-center rounded-full bg-muted px-3 py-1 text-[11px] font-medium text-muted-foreground">
+                {m.label} Mode
               </span>
             )
           })()}
           <button
             onClick={() => startNewSession(activeCourse)}
-            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors shrink-0"
+            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors justify-self-end"
           >
             <Plus size={12} weight="bold" />
             New
@@ -736,7 +769,9 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
 
         {/* Messages */}
         <div ref={messagesRef} className="flex flex-1 flex-col gap-6 overflow-y-auto overscroll-contain min-h-0 px-10 py-6">
-          {messages.length === 0 && (
+          {loadingMessages ? (
+            <MessageSkeleton />
+          ) : messages.length === 0 ? (
             <motion.div
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
@@ -745,7 +780,7 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
               <BookOpen size={32} className="text-muted-foreground/40" weight="fill" />
               <p className="text-sm text-muted-foreground">Ask anything about {activeCourse.name}.</p>
             </motion.div>
-          )}
+          ) : null}
 
           <AnimatePresence initial={false}>
             {messages.map((msg, i) => (
@@ -778,7 +813,7 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
                         ))}
                       </div>
                     )}
-                    <div className="max-w-[85%] rounded-2xl bg-primary px-4 py-2.5 text-sm text-primary-foreground leading-relaxed">
+                    <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl bg-primary px-4 py-2 text-sm leading-normal text-primary-foreground">
                       {msg.content}
                     </div>
                   </div>
@@ -949,7 +984,7 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
                   onKeyDown={handleKeyDown}
                   placeholder={`Ask about ${activeCourse.name}…`}
                   rows={1}
-                  className="flex-1 resize-none bg-transparent text-[15px] text-foreground placeholder:text-muted-foreground focus:outline-none self-center leading-relaxed overflow-y-auto overscroll-contain"
+                  className="flex-1 resize-none bg-transparent text-[15px] leading-6 text-foreground placeholder:text-muted-foreground focus:outline-none overflow-y-auto overscroll-contain"
                   style={{
                     height: taHeight,
                     transition: 'height 160ms cubic-bezier(0.22, 1, 0.36, 1)',
