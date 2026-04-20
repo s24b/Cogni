@@ -154,9 +154,10 @@ export default function OnboardingClient({ googleName, calendarConnected }: { go
   // Step 0 — Name
   const [name, setName] = useState(saved?.name ?? googleName)
 
-  // Step 1 — API Key
+  // Step 1 — API Keys
   const [apiKey, setApiKey] = useState('')
   const [apiKeySubmitted, setApiKeySubmitted] = useState(saved?.apiKeySubmitted ?? false)
+  const [openaiKey, setOpenaiKey] = useState('')
 
   // Step 2 — Session Length
   const [sessionLength, setSessionLength] = useState<25 | 45 | 90>(saved?.sessionLength ?? 45)
@@ -216,29 +217,38 @@ export default function OnboardingClient({ googleName, calendarConnected }: { go
   }
 
   async function handleContinueApiKey() {
-    // If key was already submitted in a previous session, skip the API call
-    if (apiKeySubmitted) {
-      advance()
-      return
+    // Save Anthropic key if not already saved
+    if (!apiKeySubmitted) {
+      const trimmed = apiKey.trim()
+      if (!trimmed.startsWith('sk-') || trimmed.length < 20) {
+        toast.error('Enter a valid Anthropic API key (starts with "sk-ant-").')
+        return
+      }
+      setLoading(true)
+      const res = await fetch('/api/settings/api-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: trimmed }),
+      })
+      const data = await res.json()
+      setLoading(false)
+      if (!res.ok) {
+        toast.error(data.error ?? 'Failed to save Anthropic key.')
+        return
+      }
+      setApiKeySubmitted(true)
     }
-    const trimmed = apiKey.trim()
-    if (!trimmed.startsWith('sk-') || trimmed.length < 20) {
-      toast.error('Enter a valid API key (starts with "sk-").')
-      return
+
+    // Save OpenAI key if provided (best-effort — optional)
+    const openaiTrimmed = openaiKey.trim()
+    if (openaiTrimmed) {
+      await fetch('/api/user/keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'openai_key', value: openaiTrimmed }),
+      })
     }
-    setLoading(true)
-    const res = await fetch('/api/settings/api-key', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: trimmed }),
-    })
-    const data = await res.json()
-    setLoading(false)
-    if (!res.ok) {
-      toast.error(data.error ?? 'Failed to save key.')
-      return
-    }
-    setApiKeySubmitted(true)
+
     advance()
   }
 
@@ -403,7 +413,7 @@ export default function OnboardingClient({ googleName, calendarConnected }: { go
                   <StepIcon step={step} />
 
                   {step === 0 && <StepName name={name} setName={setName} />}
-                  {step === 1 && <StepApiKey apiKey={apiKey} setApiKey={setApiKey} alreadySubmitted={apiKeySubmitted} />}
+                  {step === 1 && <StepApiKey apiKey={apiKey} setApiKey={setApiKey} alreadySubmitted={apiKeySubmitted} openaiKey={openaiKey} setOpenaiKey={setOpenaiKey} />}
                   {step === 2 && (
                     <StepSessionLength value={sessionLength} onChange={setSessionLength} />
                   )}
@@ -601,44 +611,93 @@ function StepApiKey({
   apiKey,
   setApiKey,
   alreadySubmitted,
+  openaiKey,
+  setOpenaiKey,
 }: {
   apiKey: string
   setApiKey: (v: string) => void
   alreadySubmitted: boolean
+  openaiKey: string
+  setOpenaiKey: (v: string) => void
 }) {
   return (
     <div className="space-y-6">
       <div>
         <h1 className="font-heading text-2xl font-bold text-foreground md:text-3xl">
-          You&apos;ll need an API key.
+          Set up your API keys.
         </h1>
         <p className="mt-1 text-sm text-muted-foreground md:text-base">
-          Cogni uses AI to think. Your key is encrypted and never shared.
-          Anthropic or OpenAI keys both work.
+          Keys are stored encrypted and never shared.
         </p>
       </div>
-      {alreadySubmitted ? (
-        <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-3 text-sm text-muted-foreground">
-          <CheckCircle size={16} weight="fill" className="shrink-0 text-green-500" />
-          API key already saved — you&apos;re good to continue.
-        </div>
-      ) : (
+
+      {/* Anthropic — required */}
       <div className="space-y-2">
-        <Label htmlFor="api-key">API key</Label>
+        <div className="flex items-center gap-2">
+          <Label htmlFor="api-key">Anthropic API Key</Label>
+          <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+            Required
+          </span>
+        </div>
+        <p className="text-xs text-muted-foreground">Powers all AI features — tutor, flashcards, and scheduling.</p>
+        {alreadySubmitted ? (
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2.5 text-sm text-muted-foreground">
+            <CheckCircle size={15} weight="fill" className="shrink-0 text-green-500" />
+            Anthropic key already saved.
+          </div>
+        ) : (
+          <>
+            <Input
+              id="api-key"
+              type="password"
+              placeholder="sk-ant-..."
+              value={apiKey}
+              onChange={e => setApiKey(e.target.value)}
+              autoFocus
+              autoComplete="off"
+            />
+            <a
+              href="https://console.anthropic.com/settings/keys"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] text-primary hover:underline"
+            >
+              Get a free key at console.anthropic.com →
+            </a>
+          </>
+        )}
+      </div>
+
+      <div className="h-px bg-border" />
+
+      {/* OpenAI — optional */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <Label htmlFor="openai-key">OpenAI API Key</Label>
+          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Optional
+          </span>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Enables audio study overviews and smarter semantic search. You can add this later in Settings.
+        </p>
         <Input
-          id="api-key"
+          id="openai-key"
           type="password"
-          placeholder="sk-..."
-          value={apiKey}
-          onChange={e => setApiKey(e.target.value)}
-          autoFocus
+          placeholder="sk-proj-..."
+          value={openaiKey}
+          onChange={e => setOpenaiKey(e.target.value)}
           autoComplete="off"
         />
-        <p className="text-xs text-muted-foreground">
-          Get an Anthropic key at console.anthropic.com
-        </p>
+        <a
+          href="https://platform.openai.com/api-keys"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[11px] text-primary hover:underline"
+        >
+          Get a key at platform.openai.com →
+        </a>
       </div>
-      )}
     </div>
   )
 }
