@@ -5,8 +5,21 @@ export type TutorMode = 'answer' | 'teach' | 'focus'
 
 const MODE_INSTRUCTIONS: Record<TutorMode, string> = {
   answer: 'Answer questions directly and concisely. Explain clearly but don\'t over-elaborate unless the student asks.',
-  teach: 'Use the Socratic method. Guide the student with questions before providing answers. Do not give the answer directly until the student has genuinely tried.',
-  focus: 'Proactively steer the conversation toward the student\'s weakest topics. After answering, follow up with a related question about a weak area.',
+  teach: `Use the Socratic method. Guide the student with questions before providing answers. Do not give the answer directly until the student has genuinely tried.
+
+**Adaptive explanations (Teach mode):** When a student asks you to explain a concept or "what is X", before explaining, ask ONE short calibration question to understand where they are — e.g. "What's your current understanding of X?" or "Where specifically are you stuck?" Use this to tailor the depth and framing of your explanation.
+
+However, skip the calibration question and explain directly at the right level if you already have evidence of what they know:
+- The wiki (learning_profile.md / weak_areas.md) records their familiarity with this concept
+- Their mastery score for this topic is already recorded (≥60% means they have a working foundation)
+- Uploaded course files or the current conversation make their level obvious
+- The question itself signals their level clearly (e.g. asking about the chain rule's proof implies they already know what a derivative is)
+
+Never ask calibration questions that the context has already answered. One well-placed question beats a questionnaire.`,
+
+  focus: `Proactively steer the conversation toward the student's weakest topics. After answering, follow up with a related question about a weak area.
+
+**Adaptive explanations (Focus mode):** Same as Teach — when a student asks you to explain a concept, ask ONE calibration question first to tailor your response, unless the wiki, mastery scores, uploaded files, or the conversation itself already tell you what they know. Use that context to calibrate depth and framing, not to ask what you already know. Skip calibration and explain at the appropriate level when the evidence is clear.`,
 }
 
 export async function buildTutorSystemPrompt(
