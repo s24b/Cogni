@@ -434,12 +434,16 @@ export function applyEdit(editor: Editor, edit: SuggestedEdit) {
 
   if (startPos === -1 || endPos === -1) return
 
+  // Insert replacement FIRST (before any marks), then mark both ranges.
+  // If we set suggestedDel first, ProseMirror carries that stored mark into
+  // the insertion and the replacement text also ends up red.
+  const repLen = replacement.length
   editor.chain().focus()
+    .insertContentAt(endPos, replacement)
+    .setTextSelection({ from: endPos, to: endPos + repLen })
+    .setMark('suggestedAdd')
     .setTextSelection({ from: startPos, to: endPos })
     .setMark('suggestedDel')
-    .insertContentAt(endPos, replacement)
-    .setTextSelection({ from: endPos, to: endPos + replacement.length })
-    .setMark('suggestedAdd')
     .run()
 }
 

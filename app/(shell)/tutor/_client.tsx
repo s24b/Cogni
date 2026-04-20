@@ -353,6 +353,23 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
   const [essayHtml, setEssayHtml] = useState('')
   const [essayInitialContent, setEssayInitialContent] = useState<string | undefined>(undefined)
   const [assistance, setAssistance] = useState<AssistanceLevel>('suggest')
+  const prevAssistanceRef = useRef<AssistanceLevel>('suggest')
+  // Index into messages[] from which to start sending history to the API.
+  // On essay mode switch, advances to current message count so prior turns aren't sent.
+  const historyCutoffRef = useRef(0)
+
+  function handleAssistanceChange(v: AssistanceLevel) {
+    if (v !== prevAssistanceRef.current) {
+      prevAssistanceRef.current = v
+      // Clear history context for the new mode — set cutoff to current message count.
+      // The chat display is unaffected; only what gets sent to the API changes.
+      setMessages(prev => {
+        historyCutoffRef.current = prev.length
+        return prev
+      })
+    }
+    setAssistance(v)
+  }
   // chatPct: percentage of horizontal space the chat panel takes in essay split
   const [chatPct, setChatPct] = useState(25)
   const [isDragging, setIsDragging] = useState(false)
@@ -610,6 +627,7 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
           attachments: sentAttachments.map(a => ({ name: a.name, type: a.type, data: a.data })),
           essayContent: essay.open ? essayText : undefined,
           assistanceLevel: essay.open ? assistance : undefined,
+          historyCutoff: essay.open ? historyCutoffRef.current : 0,
         }),
       })
 
@@ -1278,7 +1296,7 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
             key={essayInitialContent ?? 'new'}
             initialContent={essayInitialContent}
             assistance={assistance}
-            onAssistanceChange={setAssistance}
+            onAssistanceChange={handleAssistanceChange}
             onContentChange={(text, html) => { setEssayText(text); setEssayHtml(html) }}
             onCopyToClipboard={handleCopyToClipboard}
             onExportTxt={handleExportTxt}

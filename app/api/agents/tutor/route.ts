@@ -66,6 +66,7 @@ export async function POST(request: Request) {
     attachments?: Attachment[]
     essayContent?: string
     assistanceLevel?: 'feedback' | 'suggest' | 'assist'
+    historyCutoff?: number
   }
 
   const {
@@ -79,6 +80,7 @@ export async function POST(request: Request) {
     attachments = [],
     essayContent,
     assistanceLevel = 'suggest',
+    historyCutoff = 0,
   } = body
 
   if (!courseId || !message?.trim()) {
@@ -115,7 +117,9 @@ export async function POST(request: Request) {
   ])
 
   const client = new Anthropic({ apiKey })
-  const priorMessages = history.slice(0, -1)
+  // In essay mode, historyCutoff is set when the user switches assistance levels —
+  // messages before the cutoff are excluded so prior-mode behavior doesn't bleed over.
+  const priorMessages = history.slice(historyCutoff, -1)
 
   // Inject essay content as context prefix when in essay mode
   const effectiveMessage = essayContent
