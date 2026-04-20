@@ -8,20 +8,27 @@ export default async function InboxPage() {
   if (!user) redirect('/auth')
 
   const service = createServiceClient()
-  const { data: items } = await service
-    .from('inbox_items')
-    .select(`
-      inbox_item_id,
-      classification_status,
-      course_id,
-      tier,
-      created_at,
-      materials ( filename, file_type ),
-      courses ( name )
-    `)
-    .eq('user_id', user.id)
-    .order('created_at', { ascending: false })
-    .limit(50)
+  const [{ data: items }, { data: courses }] = await Promise.all([
+    service
+      .from('inbox_items')
+      .select(`
+        inbox_item_id,
+        classification_status,
+        course_id,
+        tier,
+        created_at,
+        materials ( filename, file_type ),
+        courses ( name )
+      `)
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(50),
+    service
+      .from('courses')
+      .select('course_id, name')
+      .eq('user_id', user.id)
+      .order('name', { ascending: true }),
+  ])
 
-  return <InboxClient items={items ?? []} />
+  return <InboxClient items={items ?? []} courses={courses ?? []} />
 }

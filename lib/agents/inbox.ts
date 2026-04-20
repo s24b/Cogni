@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { getUserApiKey } from '@/lib/vault'
 import { appendToLog } from '@/lib/wiki'
 import { runProfiler } from '@/lib/agents/profiler'
+import { processEmbeddings } from '@/lib/rag'
 
 type ClassifyResult = {
   courseId: string | null
@@ -12,14 +13,14 @@ type ClassifyResult = {
 
 async function extractText(buffer: Buffer, fileType: string, filename: string): Promise<string> {
   if (fileType === 'txt' || filename.endsWith('.txt') || filename.endsWith('.md')) {
-    return buffer.toString('utf-8').slice(0, 12000)
+    return buffer.toString('utf-8')
   }
   if (fileType === 'pdf' || filename.endsWith('.pdf')) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const pdfParse = require('pdf-parse')
       const data = await pdfParse(buffer)
-      return data.text.slice(0, 12000)
+      return data.text
     } catch {
       return `[PDF: ${filename}]`
     }
@@ -64,7 +65,8 @@ export async function classifyMaterial(
   }
 
   const buffer = Buffer.from(await fileData.arrayBuffer())
-  const content = await extractText(buffer, fileType, filename)
+  const fullContent = await extractText(buffer, fileType, filename)
+  const content = fullContent.slice(0, 12000)
 
   const courseList = (courses ?? []).map((c: { course_id: string; name: string }) => `- ${c.name} (id: ${c.course_id})`).join('\n')
 
@@ -73,6 +75,9 @@ export async function classifyMaterial(
     await service.from('materials').update({ processing_status: 'processed', course_id: forceCourseId, tier: null }).eq('material_id', materialId)
     await service.from('inbox_items').update({ classification_status: 'classified', course_id: forceCourseId, tier: null }).eq('material_id', materialId)
     await appendToLog(userId, `Inbox: "${filename}" assigned directly to course ${forceCourseId}`)
+    if (fullContent.length > 100) {
+      await processEmbeddings(userId, materialId, fullContent).catch(e => console.error('[rag] processEmbeddings failed', e))
+    }
     return { courseId: forceCourseId, tier: 4, status: 'classified' }
   }
 
@@ -94,16 +99,18 @@ ${context ? `User context: ${context}\n` : ''}Document content (first 12000 char
 ${content}
 
 Classify this document:
-1. course_id: which course_id from the list above, or null if none match
-2. tier: 1=syllabus/course overview, 2=primary material (lecture notes, textbook), 3=supplementary (practice problems, past exams), 4=misc/unclear
+1. is_context_hint: true if this is a meta-note or instruction (e.g. "these are my syllabi", "use this to help classify", references other files) rather than actual course material — false otherwise
+2. course_id: which course_id from the list above, or null if none match (ignored if is_context_hint is true)
+3. tier: 1=syllabus/course overview, 2=primary material (lecture notes, textbook), 3=supplementary (practice problems, past exams), 4=misc/unclear (ignored if is_context_hint is true)
 
-Respond with exactly: {"course_id":"<uuid or null>","tier":<1-4>}`,
+Respond with exactly: {"is_context_hint":<true|false>,"course_id":"<uuid or null>","tier":<1-4>}`,
       },
     ],
   })
 
   let courseId: string | null = null
   let tier = 4
+  let isContextHint = false
 
   const raw = message.content[0].type === 'text' ? message.content[0].text : ''
   const cleaned = raw
@@ -116,10 +123,19 @@ Respond with exactly: {"course_id":"<uuid or null>","tier":<1-4>}`,
 
   try {
     const parsed = JSON.parse(candidate)
+    isContextHint = parsed.is_context_hint === true
     courseId = parsed.course_id ?? null
     tier = typeof parsed.tier === 'number' ? Math.max(1, Math.min(4, parsed.tier)) : 4
   } catch (e) {
     console.error('[inbox] JSON parse failed. Raw response was:\n---\n' + raw.slice(0, 500) + '\n---', e)
+  }
+
+  // Auto-dismiss context hints — they're not course materials
+  if (isContextHint) {
+    await service.from('inbox_items').delete().eq('material_id', materialId)
+    await service.from('materials').delete().eq('material_id', materialId)
+    await appendToLog(userId, `Inbox: "${filename}" auto-dismissed as context hint`)
+    return { courseId: null, tier: 4, status: 'classified' }
   }
 
   const classificationStatus = courseId ? 'classified' : 'unassigned'
@@ -140,6 +156,11 @@ Respond with exactly: {"course_id":"<uuid or null>","tier":<1-4>}`,
     userId,
     `Inbox agent classified "${filename}" → ${classificationStatus === 'classified' ? `${courseName} (Tier ${tier}: ${tierLabel})` : 'unassigned'}`
   )
+
+  // Process embeddings for RAG (fire regardless of tier — all material is searchable)
+  if (fullContent.length > 100 && classificationStatus === 'classified') {
+    await processEmbeddings(userId, materialId, fullContent).catch(e => console.error('[rag] processEmbeddings failed', e))
+  }
 
   // Auto-run profiler for syllabuses (tier 1) that were successfully classified
   if (tier === 1 && courseId) {

@@ -1,9 +1,11 @@
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { runScheduler } from '@/lib/agents/scheduler'
+import { runNudgeChecks, getTopNudge } from '@/lib/agents/nudge'
 import { getUserApiKey } from '@/lib/vault'
 import { TodayClient } from './_client'
 import type { TaskItem } from '@/lib/agents/scheduler'
+import type { ActiveNudge } from '@/lib/agents/nudge'
 
 export const dynamic = 'force-dynamic'
 
@@ -46,6 +48,10 @@ export default async function TodayPage() {
     (c: { course_id: string; name: string }) => !coursesWithSyllabus.has(c.course_id)
   ) as { course_id: string; name: string }[]
 
+  // Run nudge checks and fetch top nudge (fire checks first, then read result)
+  await runNudgeChecks(user.id)
+  const activeNudge: ActiveNudge | null = await getTopNudge(user.id)
+
   // Auto-generate today's plan if none exists
   let tasks: TaskItem[] = []
   if (!plan) {
@@ -69,6 +75,7 @@ export default async function TodayPage() {
       streak={userRow?.study_streak ?? 0}
       hasApiKey={!!apiKey}
       missingSyllabus={missingSyllabus}
+      activeNudge={activeNudge}
     />
   )
 }

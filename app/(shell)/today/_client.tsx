@@ -15,9 +15,12 @@ import {
   Key,
   ClockCountdown,
   GraduationCap,
+  UploadSimple,
+  X,
 } from '@phosphor-icons/react'
 import { StaggerList, StaggerItem, ease } from '@/components/ui/motion'
 import type { TaskItem } from '@/lib/agents/scheduler'
+import type { ActiveNudge } from '@/lib/agents/nudge'
 
 const COURSE_COLORS = [
   { bg: 'bg-blue-500/10', icon: 'text-blue-600 dark:text-blue-400' },
@@ -66,6 +69,63 @@ function FlashcardTaskCard({ task, index, completed, onComplete }: {
         )}
       </div>
     </motion.div>
+  )
+}
+
+function NudgeCard({ nudge, onDismiss }: { nudge: ActiveNudge; onDismiss: () => void }) {
+  const [loading, setLoading] = useState(false)
+
+  const iconMap: Record<string, React.ReactNode> = {
+    homework_completion: <ClockCountdown size={16} className="text-red-500" weight="fill" />,
+    material_gap: <BookOpen size={16} className="text-amber-500" weight="fill" />,
+    upload_content: <UploadSimple size={16} className="text-amber-500" weight="fill" />,
+  }
+  const bgMap: Record<string, string> = {
+    homework_completion: 'bg-red-500/10',
+    material_gap: 'bg-amber-500/10',
+    upload_content: 'bg-amber-500/10',
+  }
+  const borderMap: Record<string, string> = {
+    homework_completion: 'border-red-200 dark:border-red-900/40',
+    material_gap: 'border-amber-200 dark:border-amber-900/40',
+    upload_content: 'border-amber-200 dark:border-amber-900/40',
+  }
+
+  const icon = iconMap[nudge.type] ?? <Warning size={16} className="text-muted-foreground" weight="fill" />
+  const bg = bgMap[nudge.type] ?? 'bg-muted/40'
+  const border = borderMap[nudge.type] ?? 'border-border'
+
+  async function handleAction(action: 'resolve' | 'snooze') {
+    setLoading(true)
+    try {
+      await fetch(`/api/nudges/${nudge.nudge_id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      })
+      onDismiss()
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className={`flex items-start gap-3 rounded-xl border px-4 py-3 ${border}`}>
+      <div className={`mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg ${bg}`}>
+        {icon}
+      </div>
+      <span className="flex-1 text-sm text-foreground leading-snug">{nudge.content}</span>
+      {nudge.tier !== 'critical' && (
+        <button
+          disabled={loading}
+          onClick={() => handleAction(nudge.tier === 'recurring' ? 'resolve' : 'snooze')}
+          className="shrink-0 rounded-lg p-1.5 text-muted-foreground hover:bg-muted/50 transition-colors disabled:opacity-50"
+          title={nudge.tier === 'recurring' ? 'Mark done' : 'Snooze 7 days'}
+        >
+          <X size={14} />
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -119,6 +179,7 @@ export function TodayClient({
   streak,
   hasApiKey,
   missingSyllabus,
+  activeNudge: initialNudge,
 }: {
   greeting: string
   tasks: TaskItem[]
@@ -126,9 +187,11 @@ export function TodayClient({
   streak: number
   hasApiKey: boolean
   missingSyllabus: { course_id: string; name: string }[]
+  activeNudge: ActiveNudge | null
 }) {
   const router = useRouter()
   const [completed, setCompleted] = useState<Set<number>>(new Set())
+  const [activeNudge, setActiveNudge] = useState<ActiveNudge | null>(initialNudge)
 
   const studyTasks = tasks.filter(t => t.type === 'flashcard_review') as Extract<TaskItem, { type: 'flashcard_review' }>[]
   const hwTasks = tasks.filter(t => t.type === 'homework') as Extract<TaskItem, { type: 'homework' }>[]
@@ -210,6 +273,11 @@ export function TodayClient({
         </div>
       ))}
 
+      {/* Nudge card */}
+      {activeNudge && (
+        <NudgeCard nudge={activeNudge} onDismiss={() => setActiveNudge(null)} />
+      )}
+
       {/* Inbox nudge */}
       {pendingCount > 0 && (
         <Link
@@ -269,7 +337,7 @@ export function TodayClient({
       )}
 
       {/* Empty state */}
-      {tasks.length === 0 && missingSyllabus.length === 0 && hasApiKey && (
+      {tasks.length === 0 && missingSyllabus.length === 0 && hasApiKey && !activeNudge && (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 py-16 text-center">
           <BookOpen size={36} className="text-muted-foreground/40" />
           <p className="text-sm text-muted-foreground">You&apos;re all caught up for today.</p>

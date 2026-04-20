@@ -1,6 +1,7 @@
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { readWikiFile } from '@/lib/wiki'
+import { getUserKey } from '@/lib/user-keys'
 import { CourseDetailClient } from './_client'
 
 export default async function CourseDetailPage({ params }: { params: Promise<{ courseId: string }> }) {
@@ -13,7 +14,7 @@ export default async function CourseDetailPage({ params }: { params: Promise<{ c
   const service = createServiceClient()
   const today = new Date().toISOString().split('T')[0]
 
-  const [courseResult, resultsResult, materialsResult] = await Promise.all([
+  const [courseResult, resultsResult, materialsResult, openaiKey] = await Promise.all([
     service
       .from('courses')
       .select(`
@@ -49,6 +50,7 @@ export default async function CourseDetailPage({ params }: { params: Promise<{ c
       .eq('user_id', user.id)
       .order('tier', { ascending: true })
       .order('uploaded_at', { ascending: false }),
+    getUserKey(user.id, 'openai_key'),
   ])
 
   if (!courseResult.data) redirect('/courses')
@@ -100,6 +102,7 @@ export default async function CourseDetailPage({ params }: { params: Promise<{ c
       testResults={resultsResult.data ?? []}
       materials={materialsResult.data ?? []}
       professorWiki={professorWiki}
+      hasOpenAI={!!openaiKey}
     />
   )
 }

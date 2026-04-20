@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getUserApiKey } from '@/lib/vault'
 import { readWikiFile, writeWikiFile, appendToLog } from '@/lib/wiki'
+import { retrieveChunks } from '@/lib/rag'
 
 type ExtractedTopic = {
   name: string
@@ -289,16 +290,31 @@ export async function runProfiler(
         : (courseRow?.professors as { name: string } | null)?.name) ?? null
     : null
 
-  // Build professor wiki from syllabus
+  // Build professor wiki from syllabus + any other course material via RAG
   let professorWikiWrite: Promise<void> | null = null
   if (professorId && professorName) {
     const wikiFilename = `professor_${professorId}.md`
     const existing = await readWikiFile(userId, wikiFilename)
+
+    // Retrieve additional course material chunks (lecture notes, textbooks, etc.)
+    const ragChunks = await retrieveChunks(
+      `${professorName} exam style grading topics emphasis`,
+      courseId,
+      userId,
+      4
+    ).catch(() => [])
+
+    const additionalContext = ragChunks.length > 0
+      ? `\nAdditional course material excerpts:\n${ragChunks.map(c => c.content).join('\n\n---\n\n')}`
+      : ''
+
+    const enrichedSyllabus = syllabusText + additionalContext
+
     const professorProfile = await extractProfessorProfile(
       client,
       professorName,
       courseName,
-      syllabusText,
+      enrichedSyllabus,
       existing,
     )
     if (professorProfile) {

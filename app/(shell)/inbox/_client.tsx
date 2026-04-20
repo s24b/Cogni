@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useDropzone } from 'react-dropzone'
 import {
@@ -139,9 +139,14 @@ function StagedItemRow({
   )
 }
 
-export function InboxClient({ items }: { items: InboxItem[] }) {
+type Course = { course_id: string; name: string }
+
+export function InboxClient({ items: initialItems, courses }: { items: InboxItem[]; courses: Course[] }) {
   const router = useRouter()
+  const [items, setItems] = useState<InboxItem[]>(initialItems)
   const [staged, setStaged] = useState<StagedItem[]>([])
+
+  useEffect(() => { setItems(initialItems) }, [initialItems])
   const [processing, setProcessing] = useState(false)
   const counterRef = useRef(0)
 
@@ -187,6 +192,24 @@ export function InboxClient({ items }: { items: InboxItem[] }) {
 
   function removeItem(id: string) {
     setStaged(prev => prev.filter(item => item.id !== id))
+  }
+
+  async function dismissItem(itemId: string) {
+    setItems(prev => prev.filter(i => i.inbox_item_id !== itemId))
+    await fetch(`/api/inbox/items/${itemId}`, { method: 'DELETE' })
+  }
+
+  async function assignItem(itemId: string, courseId: string) {
+    setItems(prev => prev.map(i =>
+      i.inbox_item_id === itemId
+        ? { ...i, classification_status: 'classified', course_id: courseId, courses: courses.find(c => c.course_id === courseId) ? { name: courses.find(c => c.course_id === courseId)!.name } : i.courses }
+        : i
+    ))
+    await fetch(`/api/inbox/items/${itemId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ courseId }),
+    })
   }
 
   async function processAll() {
@@ -318,30 +341,57 @@ export function InboxClient({ items }: { items: InboxItem[] }) {
             {items.map((item) => (
               <div
                 key={item.inbox_item_id}
-                className="flex items-center gap-4 rounded-xl border border-border bg-card px-4 py-3"
+                className="flex flex-col gap-2 rounded-xl border border-border bg-card px-4 py-3"
               >
-                <FileIcon fileType={item.materials.file_type} />
+                <div className="flex items-center gap-4">
+                  <FileIcon fileType={item.materials.file_type} />
 
-                <div className="flex flex-1 flex-col gap-0.5 min-w-0">
-                  <span className="truncate text-sm font-medium text-foreground">
-                    {item.materials.filename}
-                  </span>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <StatusBadge status={item.classification_status} />
-                    {item.courses && (
-                      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-                        {item.courses.name}
-                      </span>
-                    )}
-                    {item.tier && (
-                      <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                        {TIER_LABEL[item.tier] ?? `Tier ${item.tier}`}
-                      </span>
-                    )}
+                  <div className="flex flex-1 flex-col gap-0.5 min-w-0">
+                    <span className="truncate text-sm font-medium text-foreground">
+                      {item.materials.filename}
+                    </span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <StatusBadge status={item.classification_status} />
+                      {item.courses && (
+                        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                          {item.courses.name}
+                        </span>
+                      )}
+                      {item.tier && (
+                        <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                          {TIER_LABEL[item.tier] ?? `Tier ${item.tier}`}
+                        </span>
+                      )}
+                    </div>
                   </div>
+
+                  <span className="shrink-0 text-xs text-muted-foreground">{timeAgo(item.created_at)}</span>
+
+                  {(item.classification_status === 'unassigned' || item.classification_status === 'failed') && (
+                    <button
+                      onClick={() => dismissItem(item.inbox_item_id)}
+                      title="Dismiss"
+                      className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <X size={13} />
+                    </button>
+                  )}
                 </div>
 
-                <span className="shrink-0 text-xs text-muted-foreground">{timeAgo(item.created_at)}</span>
+                {item.classification_status === 'unassigned' && courses.length > 0 && (
+                  <div className="flex items-center gap-2 pl-7">
+                    <select
+                      defaultValue=""
+                      onChange={e => { if (e.target.value) assignItem(item.inbox_item_id, e.target.value) }}
+                      className="flex-1 rounded-lg border border-border bg-muted/40 px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+                    >
+                      <option value="" disabled>Assign to a course…</option>
+                      {courses.map(c => (
+                        <option key={c.course_id} value={c.course_id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
             ))}
           </div>

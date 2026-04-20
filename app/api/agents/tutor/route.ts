@@ -11,6 +11,7 @@ import {
 } from '@/lib/agents/tutor'
 import { readWikiFile, writeWikiFile } from '@/lib/wiki'
 import { newCardDefaults } from '@/lib/fsrs'
+import { retrieveChunks } from '@/lib/rag'
 import Anthropic from '@anthropic-ai/sdk'
 import { NextResponse } from 'next/server'
 
@@ -109,11 +110,18 @@ export async function POST(request: Request) {
     .single()
 
   const [systemPrompt, history] = await Promise.all([
-    buildTutorSystemPrompt(user.id, courseId, courseName, mode, {
-      essayMode: !!essayContent,
-      assistanceLevel,
-      courseType: courseRow?.course_type ?? undefined,
-    }),
+    (async () => {
+      const ragChunks = await retrieveChunks(message, courseId, user.id, 5).catch(() => [])
+      const ragContext = ragChunks.length > 0
+        ? ragChunks.map(c => c.content).join('\n\n---\n\n')
+        : undefined
+      return buildTutorSystemPrompt(user.id, courseId, courseName, mode, {
+        essayMode: !!essayContent,
+        assistanceLevel,
+        courseType: courseRow?.course_type ?? undefined,
+        ragContext,
+      })
+    })(),
     getSessionMessages(sessionId),
   ])
 

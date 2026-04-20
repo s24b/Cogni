@@ -64,7 +64,7 @@ export async function buildTutorSystemPrompt(
   courseId: string,
   courseName: string,
   mode: TutorMode,
-  opts?: { essayMode?: boolean; assistanceLevel?: AssistanceLevel; courseType?: string }
+  opts?: { essayMode?: boolean; assistanceLevel?: AssistanceLevel; courseType?: string; ragContext?: string }
 ): Promise<string> {
   const service = createServiceClient()
 
@@ -100,6 +100,10 @@ Do NOT ask verification or check-your-understanding questions. The student wants
 
   const essaySection = opts?.essayMode ? buildEssaySection(opts.assistanceLevel ?? 'suggest', opts.courseType) : ''
 
+  const ragSection = opts?.ragContext
+    ? `\n## Retrieved course material\nThe following excerpts from the student's uploaded materials are relevant to their question. Prefer this over general knowledge when answering.\n\n${opts.ragContext}`
+    : ''
+
   return `You are a tutor helping a student study ${courseName}. You have access to their course materials and mastery data.
 
 ## Behaviour
@@ -116,6 +120,7 @@ ${MODE_INSTRUCTIONS[mode]}
 ## Context
 ${learningProfile ?? ''}
 ${weakTopics ? `\nCurrent weak areas:\n${weakTopics}` : ''}
+${ragSection}
 ${verificationSection}
 
 ## Wiki patterns

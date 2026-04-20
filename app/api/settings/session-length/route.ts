@@ -1,0 +1,18 @@
+import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { NextResponse } from 'next/server'
+
+export async function PATCH(request: Request) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const { sessionLength } = await request.json() as { sessionLength: number }
+  if (![25, 45, 90].includes(sessionLength)) {
+    return NextResponse.json({ error: 'Invalid sessionLength' }, { status: 400 })
+  }
+
+  const service = createServiceClient()
+  await service.from('users').update({ session_length_preference: sessionLength }).eq('user_id', user.id)
+
+  return NextResponse.json({ ok: true })
+}

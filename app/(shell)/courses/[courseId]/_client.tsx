@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -22,6 +22,10 @@ import {
   X,
   UploadSimple,
   Check,
+  Waveform,
+  Play,
+  Pause,
+  DownloadSimple,
 } from '@phosphor-icons/react'
 import { useCallback } from 'react'
 import { useDropzone } from 'react-dropzone'
@@ -308,6 +312,170 @@ function CourseUpload({ courseId, onDone }: { courseId: string; onDone: () => vo
   )
 }
 
+function AudioPlayer({ url, estimatedMinutes }: { url: string; estimatedMinutes: number }) {
+  const audioRef = useRef<HTMLAudioElement>(null)
+  const [playing, setPlaying] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [duration, setDuration] = useState(0)
+  const [speed, setSpeed] = useState(1)
+
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    const onTime = () => setProgress(audio.currentTime)
+    const onMeta = () => setDuration(audio.duration)
+    const onEnd = () => setPlaying(false)
+    audio.addEventListener('timeupdate', onTime)
+    audio.addEventListener('loadedmetadata', onMeta)
+    audio.addEventListener('ended', onEnd)
+    return () => {
+      audio.removeEventListener('timeupdate', onTime)
+      audio.removeEventListener('loadedmetadata', onMeta)
+      audio.removeEventListener('ended', onEnd)
+    }
+  }, [])
+
+  function togglePlay() {
+    const audio = audioRef.current
+    if (!audio) return
+    if (playing) { audio.pause(); setPlaying(false) }
+    else { audio.play(); setPlaying(true) }
+  }
+
+  function handleSeek(e: React.ChangeEvent<HTMLInputElement>) {
+    const audio = audioRef.current
+    if (!audio) return
+    const t = Number(e.target.value)
+    audio.currentTime = t
+    setProgress(t)
+  }
+
+  function changeSpeed(s: number) {
+    setSpeed(s)
+    if (audioRef.current) audioRef.current.playbackRate = s
+  }
+
+  function formatTime(s: number) {
+    const m = Math.floor(s / 60)
+    const sec = Math.floor(s % 60)
+    return `${m}:${sec.toString().padStart(2, '0')}`
+  }
+
+  const displayDuration = duration > 0 ? duration : estimatedMinutes * 60
+
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-border bg-card px-4 py-3">
+      <audio ref={audioRef} src={url} preload="metadata" />
+      <div className="flex items-center gap-3">
+        <button
+          onClick={togglePlay}
+          className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+        >
+          {playing
+            ? <Pause size={16} weight="fill" />
+            : <Play size={16} weight="fill" />
+          }
+        </button>
+        <div className="flex flex-1 flex-col gap-1 min-w-0">
+          <input
+            type="range"
+            min={0}
+            max={displayDuration}
+            value={progress}
+            onChange={handleSeek}
+            className="w-full h-1.5 cursor-pointer accent-primary"
+          />
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] tabular-nums text-muted-foreground">{formatTime(progress)}</span>
+            <span className="text-[10px] tabular-nums text-muted-foreground">{formatTime(displayDuration)}</span>
+          </div>
+        </div>
+      </div>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1">
+          {[0.75, 1, 1.25, 1.5].map(s => (
+            <button
+              key={s}
+              onClick={() => changeSpeed(s)}
+              className={`rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                speed === s ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {s}×
+            </button>
+          ))}
+        </div>
+        <a
+          href={url}
+          download="audio-overview.mp3"
+          className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted/50 transition-colors"
+        >
+          <DownloadSimple size={12} weight="bold" />
+          Download
+        </a>
+      </div>
+    </div>
+  )
+}
+
+function AudioOverviewSection({ courseId, hasOpenAI }: { courseId: string; hasOpenAI: boolean }) {
+  const [audioUrl, setAudioUrl] = useState<string | null>(null)
+  const [estimatedMinutes, setEstimatedMinutes] = useState(8)
+  const [generating, setGenerating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleGenerate() {
+    setGenerating(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/agents/audio-overview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ courseId }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Generation failed')
+      setAudioUrl(json.url)
+      setEstimatedMinutes(json.estimated_minutes ?? 8)
+    } catch (e) {
+      setError(String(e).replace('Error: ', ''))
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  if (!hasOpenAI) {
+    return (
+      <div className="flex items-center gap-3 rounded-xl border border-dashed border-border px-4 py-3">
+        <Waveform size={14} className="text-muted-foreground shrink-0" weight="fill" />
+        <span className="text-xs text-muted-foreground">Audio overviews require an OpenAI API key — add it in Settings.</span>
+      </div>
+    )
+  }
+
+  if (audioUrl) {
+    return <AudioPlayer url={audioUrl} estimatedMinutes={estimatedMinutes} />
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      {error && (
+        <p className="text-xs text-red-500">{error}</p>
+      )}
+      <button
+        onClick={handleGenerate}
+        disabled={generating}
+        className="flex items-center justify-center gap-2 rounded-xl border border-border bg-card px-4 py-3 text-sm font-medium text-foreground hover:bg-muted/20 disabled:opacity-50 transition-colors"
+      >
+        {generating
+          ? <><CircleNotch size={15} className="animate-spin text-primary" />Generating overview… (~30–60 sec)</>
+          : <><Waveform size={15} className="text-primary" weight="fill" />Generate audio overview</>
+        }
+      </button>
+    </div>
+  )
+}
+
 function ArchiveModal({
   courseName,
   onConfirm,
@@ -410,11 +578,13 @@ export function CourseDetailClient({
   testResults,
   materials,
   professorWiki,
+  hasOpenAI,
 }: {
   course: Course
   testResults: TestResult[]
   materials: Material[]
   professorWiki: string | null
+  hasOpenAI: boolean
 }) {
   const router = useRouter()
   const [mode, setMode] = useState<Mode>('overview')
@@ -517,6 +687,12 @@ export function CourseDetailClient({
 
             {/* Upload to course */}
             <CourseUpload courseId={course.course_id} onDone={() => router.refresh()} />
+
+            {/* Audio overview */}
+            <div className="flex flex-col gap-3">
+              <h2 className="text-sm font-semibold text-foreground">Audio Overview</h2>
+              <AudioOverviewSection courseId={course.course_id} hasOpenAI={hasOpenAI} />
+            </div>
 
             {/* Professor profile */}
             {course.professor_name && (
