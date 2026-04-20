@@ -729,6 +729,20 @@ export function QuizSession({ courseId, courseName, topicOptions, initialQuestio
   const [loadingConfig, setLoadingConfig] = useState(false)
   const onExpireRef = useRef<() => void>(() => {})
 
+  // Sync when tutor regenerates the quiz (e.g. "add 2 more questions"): update
+  // questions in place so the user doesn't have to close and reopen the split view.
+  const lastInitialRef = useRef(initialQuestions)
+  useEffect(() => {
+    if (initialQuestions && initialQuestions !== lastInitialRef.current) {
+      lastInitialRef.current = initialQuestions
+      setQuestions(initialQuestions.map(normalizeQuestion))
+      setCurrentIndex(0)
+      setUserAnswers([])
+      setSummary(null)
+      setPhase('quiz')
+    }
+  }, [initialQuestions])
+
   const submitAnswers = useCallback(async (answers: string[], qs: QuizQuestion[]) => {
     setPhase('grading')
     try {
@@ -845,6 +859,15 @@ export function QuizSession({ courseId, courseName, topicOptions, initialQuestio
               {currentIndex + 1}/{questions.length}
             </span>
           </div>
+        )}
+        {onClose && (
+          <button
+            onClick={onClose}
+            aria-label="Close quiz"
+            className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
+          >
+            <X size={14} />
+          </button>
         )}
       </div>
 

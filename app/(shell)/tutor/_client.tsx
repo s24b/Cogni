@@ -36,6 +36,7 @@ import { StaggerList, StaggerItem, ease } from '@/components/ui/motion'
 import { BorderBeam } from 'border-beam'
 import { EssayEditor, applyEdit, type AssistanceLevel, type SuggestedEdit } from '@/components/essay/EssayEditor'
 import { QuizSession, type QuizQuestion } from '@/components/quiz/QuizSession'
+import type { GradeSummary } from '@/lib/agents/practice-quiz'
 import { FlashcardViewer } from '@/components/quiz/FlashcardViewer'
 import type { Editor } from '@tiptap/react'
 
@@ -45,15 +46,15 @@ type Mode = 'answer' | 'teach' | 'focus'
 type InlineCard = { type: 'flashcards' | 'quiz' | 'essay'; count: number; topic: string; data?: object[] }
 type LocalAttachment = { name: string; type: string; data: string; preview?: string }
 type GradeResult = { score: number; rationale: string; topic: string }
+type ChatSegment =
+  | { kind: 'thinking'; text: string; done: boolean }
+  | { kind: 'search'; query: string; done: boolean }
 type Message = {
   role: 'user' | 'assistant' | 'system'
   content: string
   streaming?: boolean
   inlineCard?: InlineCard
-  thinking?: string
-  thinkingDone?: boolean
-  searchQuery?: string
-  searchDone?: boolean
+  segments?: ChatSegment[]
   grade?: GradeResult
   attachments?: LocalAttachment[]
 }
@@ -195,11 +196,11 @@ function ThinkingBlock({ thinking, done }: { thinking: string; done: boolean }) 
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2, ease }}
-      className="mb-2 w-full rounded-xl border border-violet-200/60 bg-violet-50/50 dark:border-violet-800/30 dark:bg-violet-950/20 overflow-hidden"
+      className="mb-2 w-fit max-w-xl rounded-xl border border-violet-200/60 bg-violet-50/50 dark:border-violet-800/30 dark:bg-violet-950/20 overflow-hidden"
     >
       <button
         onClick={() => setExpanded(e => !e)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left"
+        className="flex items-center gap-2 px-3 py-2 text-left"
       >
         {done ? (
           <Brain size={13} className="shrink-0 text-violet-500" weight="fill" />
@@ -437,6 +438,10 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const inputWrapperRef = useRef<HTMLDivElement>(null)
+  const optionsPanelRef = useRef<HTMLDivElement>(null)
+  const plusBtnRef = useRef<HTMLButtonElement>(null)
+  const inputBarRef = useRef<HTMLDivElement>(null)
+  const [dragActive, setDragActive] = useState(false)
 
   useEffect(() => {
     const el = messagesRef.current
@@ -497,13 +502,15 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
     document.addEventListener('mouseup', onUp)
   }
 
-  // Close options panel on click outside
+  // Close options panel on any click outside the panel itself or the plus button.
+  // Clicking the textarea / other input-bar buttons should close the menu.
   useEffect(() => {
     if (!showOptions) return
     function handleClickOutside(e: MouseEvent) {
-      if (inputWrapperRef.current && !inputWrapperRef.current.contains(e.target as Node)) {
-        setShowOptions(false)
-      }
+      const target = e.target as Node
+      if (optionsPanelRef.current?.contains(target)) return
+      if (plusBtnRef.current?.contains(target)) return
+      setShowOptions(false)
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
@@ -648,13 +655,15 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
     }
   }
 
-  async function sendMessage() {
-    if (!input.trim() || !activeCourse || sending) return
-    const text = input.trim()
-    const sentAttachments = [...attachments]
-    setInput('')
-    setAttachments([])
-    setTaHeight(24)
+  async function sendMessage(textOverride?: string) {
+    const text = (textOverride ?? input).trim()
+    if (!text || !activeCourse || sending) return
+    const sentAttachments = textOverride ? [] : [...attachments]
+    if (!textOverride) {
+      setInput('')
+      setAttachments([])
+      setTaHeight(24)
+    }
     setSending(true)
 
     const userMsg: Message = { role: 'user', content: text, attachments: sentAttachments }
@@ -703,10 +712,33 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
       const decoder = new TextDecoder()
       let lineBuffer = ''
       let accumulated = ''
-      let thinkBuffer = ''
-      let searchQuery = ''
+      const segments: ChatSegment[] = []
       let cardPayload: InlineCard | undefined
       let gradeResult: GradeResult | undefined
+      let errored = false
+
+      // Helpers — mutate in place, then push a new snapshot to React state
+      function updateLastOfKind<K extends ChatSegment['kind']>(
+        kind: K,
+        mutator: (seg: Extract<ChatSegment, { kind: K }>) => void,
+      ) {
+        for (let i = segments.length - 1; i >= 0; i--) {
+          if (segments[i].kind === kind) {
+            mutator(segments[i] as Extract<ChatSegment, { kind: K }>)
+            return
+          }
+        }
+      }
+      function syncSegments() {
+        setMessages(prev => {
+          const updated = [...prev]
+          updated[updated.length - 1] = {
+            ...updated[updated.length - 1],
+            segments: segments.map(s => ({ ...s })),
+          }
+          return updated
+        })
+      }
 
       if (reader) {
         while (true) {
@@ -731,42 +763,33 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
                 accumulated += event.c
                 setMessages(prev => {
                   const updated = [...prev]
-                  const last = updated[updated.length - 1]
                   updated[updated.length - 1] = {
-                    ...last,
+                    ...updated[updated.length - 1],
                     role: 'assistant',
                     content: accumulated,
                     streaming: true,
-                    thinking: thinkBuffer || undefined,
-                    thinkingDone: true,
-                    searchQuery: searchQuery || undefined,
-                    searchDone: true,
                     grade: gradeResult,
                   }
                   return updated
                 })
-              } else if (event.t === 'think' && event.c) {
-                thinkBuffer += event.c
-                setMessages(prev => {
-                  const updated = [...prev]
-                  updated[updated.length - 1] = {
-                    ...updated[updated.length - 1],
-                    thinking: thinkBuffer,
-                    thinkingDone: false,
-                  }
-                  return updated
+              } else if (event.t === 'think_start') {
+                segments.push({ kind: 'thinking', text: '', done: false })
+                syncSegments()
+              } else if (event.t === 'think_delta' && event.c) {
+                updateLastOfKind('thinking', s => { s.text += event.c! })
+                syncSegments()
+              } else if (event.t === 'think_stop') {
+                updateLastOfKind('thinking', s => { s.done = true })
+                syncSegments()
+              } else if (event.t === 'search_start') {
+                segments.push({ kind: 'search', query: '', done: false })
+                syncSegments()
+              } else if (event.t === 'search_done') {
+                updateLastOfKind('search', s => {
+                  s.query = event.q ?? ''
+                  s.done = true
                 })
-              } else if (event.t === 'search' && event.q) {
-                searchQuery = event.q
-                setMessages(prev => {
-                  const updated = [...prev]
-                  updated[updated.length - 1] = {
-                    ...updated[updated.length - 1],
-                    searchQuery,
-                    searchDone: false,
-                  }
-                  return updated
-                })
+                syncSegments()
               } else if (event.t === 'card' && event.kind) {
                 cardPayload = {
                   type: event.kind,
@@ -819,6 +842,7 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
                   return updated
                 })
               } else if (event.t === 'error') {
+                errored = true
                 const errMsg = event.c ?? 'Something went wrong'
                 setMessages(prev => {
                   const updated = [...prev]
@@ -833,23 +857,34 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
         }
       }
 
-      setMessages(prev => {
-        const updated = [...prev]
-        updated[updated.length - 1] = {
-          role: 'assistant',
-          content: accumulated,
-          thinking: thinkBuffer || undefined,
-          thinkingDone: true,
-          searchQuery: searchQuery || undefined,
-          searchDone: true,
-          inlineCard: cardPayload,
-          grade: gradeResult,
-        }
-        return updated
-      })
+      if (!errored) {
+        // Make sure any segments still marked in-progress get closed out
+        segments.forEach(s => { s.done = true })
+        setMessages(prev => {
+          const updated = [...prev]
+          updated[updated.length - 1] = {
+            role: 'assistant',
+            content: accumulated,
+            segments: segments.length > 0 ? segments.map(s => ({ ...s })) : undefined,
+            inlineCard: cardPayload,
+            grade: gradeResult,
+          }
+          return updated
+        })
+      }
     } finally {
       setSending(false)
     }
+  }
+
+  function handleQuizComplete(summary: GradeSummary) {
+    const topic = splitContent?.topic ?? 'the quiz'
+    const total = splitContent?.count ?? summary.correctCount
+    const missedParts = summary.missedTopics.length > 0
+      ? ` I struggled most with: ${summary.missedTopics.map(t => `${t.topic} (${t.wrongCount} wrong)`).join(', ')}.`
+      : ' I got everything right.'
+    const text = `I just finished the quiz on ${topic}. I got ${summary.correctCount} out of ${total} correct (${Math.round(summary.scorePct)}%).${missedParts} Can you review my results and help me understand what to work on?`
+    sendMessage(text)
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -1096,18 +1131,19 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
                 ) : (
                   /* Assistant message */
                   <div className="flex w-full flex-col items-start gap-2">
-                    {msg.thinking && (
-                      <ThinkingBlock thinking={msg.thinking} done={!!msg.thinkingDone} />
+                    {msg.segments?.map((seg, j) =>
+                      seg.kind === 'thinking' ? (
+                        <ThinkingBlock key={j} thinking={seg.text} done={seg.done} />
+                      ) : (
+                        <SearchBlock key={j} query={seg.query} done={seg.done} />
+                      )
                     )}
-                    {msg.searchQuery && (
-                      <SearchBlock query={msg.searchQuery} done={!!msg.searchDone} />
-                    )}
-                    {/* Show bubble when content exists OR nothing else is showing */}
-                    {(msg.content || (!msg.thinking && !msg.searchQuery)) && (
+                    {/* Show bubble when content exists OR no segments present */}
+                    {(msg.content || !msg.segments || msg.segments.length === 0) && (
                       <div className="max-w-[85%] rounded-2xl bg-muted px-4 py-3">
                         <AssistantMessage
                           content={msg.content}
-                          streaming={msg.streaming && !msg.thinking && !msg.searchQuery}
+                          streaming={msg.streaming && !msg.segments?.some(s => !s.done)}
                         />
                       </div>
                     )}
@@ -1164,6 +1200,7 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
               <AnimatePresence>
                 {showOptions && (
                   <motion.div
+                    ref={optionsPanelRef}
                     initial={{ opacity: 0, y: 8, scale: 0.97 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 8, scale: 0.97 }}
@@ -1234,10 +1271,40 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
                 strength={0.5}
                 active={deepThink}
               >
-              <div className="flex items-center gap-2 rounded-2xl border border-border bg-card px-4 py-3 shadow-sm">
+              <div
+                ref={inputBarRef}
+                onDragEnter={e => {
+                  if (e.dataTransfer.types.includes('Files')) {
+                    e.preventDefault()
+                    setDragActive(true)
+                  }
+                }}
+                onDragOver={e => {
+                  if (e.dataTransfer.types.includes('Files')) {
+                    e.preventDefault()
+                    e.dataTransfer.dropEffect = 'copy'
+                  }
+                }}
+                onDragLeave={e => {
+                  if (!inputBarRef.current?.contains(e.relatedTarget as Node)) {
+                    setDragActive(false)
+                  }
+                }}
+                onDrop={e => {
+                  if (e.dataTransfer.files.length > 0) {
+                    e.preventDefault()
+                    setDragActive(false)
+                    handleFiles(e.dataTransfer.files)
+                  }
+                }}
+                className={`flex items-center gap-2 rounded-2xl border bg-card px-4 py-3 shadow-sm transition-colors ${
+                  dragActive ? 'border-primary bg-primary/5' : 'border-border'
+                }`}
+              >
                 {/* Left controls — plus and paperclip grouped */}
                 <div className="flex items-center gap-0.5 shrink-0">
                   <button
+                    ref={plusBtnRef}
                     onClick={() => setShowOptions(p => !p)}
                     aria-label="Options"
                     className={`flex size-8 items-center justify-center rounded-lg transition-colors ${
@@ -1272,6 +1339,21 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
                   value={input}
                   onChange={e => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
+                  onPaste={e => {
+                    const files: File[] = []
+                    for (const item of Array.from(e.clipboardData.items)) {
+                      if (item.kind === 'file') {
+                        const f = item.getAsFile()
+                        if (f) files.push(f)
+                      }
+                    }
+                    if (files.length > 0) {
+                      e.preventDefault()
+                      const dt = new DataTransfer()
+                      files.forEach(f => dt.items.add(f))
+                      handleFiles(dt.files)
+                    }
+                  }}
                   placeholder={`Ask about ${activeCourse.name}…`}
                   rows={1}
                   className="flex-1 resize-none bg-transparent text-[15px] leading-6 text-foreground placeholder:text-muted-foreground focus:outline-none overflow-y-auto overscroll-contain"
@@ -1290,7 +1372,7 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
                     <Microphone size={16} />
                   </button>
                   <button
-                    onClick={sendMessage}
+                    onClick={() => sendMessage()}
                     disabled={!input.trim() || sending}
                     aria-label="Send message"
                     className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground disabled:opacity-40 hover:bg-primary/90 transition-colors"
@@ -1405,6 +1487,7 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
                 courseName={activeCourse.name}
                 initialQuestions={splitContent.data as QuizQuestion[]}
                 onClose={() => setSplitExpanded(false)}
+                onComplete={handleQuizComplete}
               />
             ) : splitContent.type === 'flashcards' && splitContent.data ? (
               <FlashcardViewer

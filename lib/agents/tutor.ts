@@ -64,13 +64,14 @@ export async function buildTutorSystemPrompt(
   courseId: string,
   courseName: string,
   mode: TutorMode,
-  opts?: { essayMode?: boolean; assistanceLevel?: AssistanceLevel; courseType?: string; ragContext?: string }
+  opts?: { essayMode?: boolean; assistanceLevel?: AssistanceLevel; courseType?: string; professorId?: string; ragContext?: string }
 ): Promise<string> {
   const service = createServiceClient()
 
-  const [learningProfile, weakAreas] = await Promise.all([
+  const [learningProfile, weakAreas, professorWiki] = await Promise.all([
     readWikiFile(userId, 'learning_profile.md'),
     readWikiFile(userId, 'weak_areas.md'),
+    opts?.professorId ? readWikiFile(userId, `professor_${opts.professorId}.md`) : Promise.resolve(null),
   ])
 
   const { data: mastery } = await service
@@ -104,6 +105,10 @@ Do NOT ask verification or check-your-understanding questions. The student wants
     ? `\n## Retrieved course material\nThe following excerpts from the student's uploaded materials are relevant to their question. Prefer this over general knowledge when answering.\n\n${opts.ragContext}`
     : ''
 
+  const professorSection = professorWiki
+    ? `\n## Professor profile\nThis is what is known about the professor who teaches ${courseName}. Use this to tailor explanations, anticipate exam-style questions, and calibrate depth to how this professor tests.\n\n${professorWiki}`
+    : ''
+
   return `You are a tutor helping a student study ${courseName}. You have access to their course materials and mastery data.
 
 ## Behaviour
@@ -120,6 +125,7 @@ ${MODE_INSTRUCTIONS[mode]}
 ## Context
 ${learningProfile ?? ''}
 ${weakTopics ? `\nCurrent weak areas:\n${weakTopics}` : ''}
+${professorSection}
 ${ragSection}
 ${verificationSection}
 
@@ -131,6 +137,19 @@ You have access to a web_search tool. Use it ONLY when:
 - The question requires up-to-date information not in the course materials
 - The student explicitly asks you to look something up
 Always prefer course materials first. Only search for information directly relevant to ${courseName}.
+
+## Artifacts you can generate
+You can open visual artifacts in the student's split view by calling the right tool. Know what you have and offer them proactively when they'd help:
+- **create_flashcards** — spaced-repetition deck on one topic. Best after explaining definitions, formulas, vocabulary, or a discrete body of facts the student needs to memorize.
+- **create_quiz** — practice quiz (MC / short answer / mixed). Best after working through a concept to test whether understanding stuck, or when the student wants to self-assess on a topic or weak area.
+- **open_essay_mode** — split-view essay editor with tracked-change suggestions. Call IMMEDIATELY whenever the student mentions a paper, essay, report, or written assignment.
+
+When the student says yes to an offer, generate immediately — follow each tool's own description for any quick clarifying questions (format, count, subtopic). Never offer more than one artifact in the same message; pick whichever fits the moment best.
+
+**How strongly to recommend, by mode:**
+- **Answer mode** (${mode === 'answer' ? 'CURRENT' : 'not active'}): Low-pressure. If a topic naturally invites practice, drop ONE line at the end — "Want a quick quiz to check this?" — and move on. Don't push if the student keeps asking questions.
+- **Teach mode** (${mode === 'teach' ? 'CURRENT' : 'not active'}): Practice is core to the Socratic loop. Once the student has demonstrated understanding through your guiding questions, confidently offer a quiz or flashcards: "You've got it — let's lock it in with 5 questions." Expect to close most successful teaching exchanges with this.
+- **Focus mode** (${mode === 'focus' ? 'CURRENT' : 'not active'}): Aggressively steer the student toward their weakest topics using these tools. End most responses by offering flashcards or a quiz specifically on a weak area from the list above. This is the primary way Focus mode earns its name — not just mentioning weak areas, but acting on them.
 
 ## Guardrails
 - Only answer questions about ${courseName}. Accept common abbreviations, full names, and synonyms (e.g. "calc" and "Calculus" are the same). For a clearly unrelated course: "I'm focused on ${courseName} right now. Switch courses to discuss that."

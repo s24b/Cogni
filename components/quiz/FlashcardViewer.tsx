@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
@@ -8,9 +8,9 @@ import rehypeKatex from 'rehype-katex'
 import {
   ArrowLeft,
   ArrowRight,
-  ArrowsIn,
   Cards,
   ArrowCounterClockwise,
+  X,
 } from '@phosphor-icons/react'
 import { ease } from '@/components/ui/motion'
 
@@ -37,6 +37,17 @@ export function FlashcardViewer({ cards, topic, onClose }: Props) {
   const [index, setIndex] = useState(0)
   const [flipped, setFlipped] = useState(false)
   const [direction, setDirection] = useState<1 | -1>(1)
+
+  // Reset when tutor regenerates the deck (new cards array from parent).
+  const lastCardsRef = useRef(cards)
+  useEffect(() => {
+    if (cards !== lastCardsRef.current) {
+      lastCardsRef.current = cards
+      setIndex(0)
+      setFlipped(false)
+      setDirection(1)
+    }
+  }, [cards])
 
   const card = cards[index]
 
@@ -71,9 +82,10 @@ export function FlashcardViewer({ cards, topic, onClose }: Props) {
         <span className="text-xs tabular-nums text-muted-foreground">{index + 1}/{cards.length}</span>
         <button
           onClick={onClose}
+          aria-label="Close flashcards"
           className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
         >
-          <ArrowsIn size={14} />
+          <X size={14} />
         </button>
       </div>
 

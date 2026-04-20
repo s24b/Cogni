@@ -3,6 +3,10 @@ import { createServiceClient } from '@/lib/supabase/server'
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const GOOGLE_CALENDAR_API = 'https://www.googleapis.com/calendar/v3'
 
+// Study hours window: 8am–10pm
+const STUDY_START_HOUR = 8
+const STUDY_END_HOUR = 22
+
 type TokenRow = {
   access_token: string
   refresh_token: string | null
@@ -94,6 +98,117 @@ async function getOrCreateCogniCalendar(token: string, userId: string): Promise<
   return cal.id
 }
 
+// Delete all events from the Cogni calendar for a specific date (clears stale blocks)
+async function deleteCogniEventsForDate(token: string, calendarId: string, date: string): Promise<void> {
+  const timeMin = new Date(date + 'T00:00:00').toISOString()
+  const timeMax = new Date(date + 'T23:59:59').toISOString()
+
+  const res = await fetch(
+    `${GOOGLE_CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events?timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}&singleEvents=true&maxResults=250`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  )
+
+  if (!res.ok) return
+
+  const data = await res.json()
+  const events: Array<{ id: string }> = data.items ?? []
+
+  await Promise.all(
+    events.map(e =>
+      fetch(`${GOOGLE_CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(e.id)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+    )
+  )
+}
+
+// List all calendar IDs the user has access to
+async function listAllCalendarIds(token: string): Promise<string[]> {
+  const res = await fetch(`${GOOGLE_CALENDAR_API}/users/me/calendarList?maxResults=250`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+
+  if (!res.ok) return ['primary']
+
+  const data = await res.json()
+  return (data.items ?? []).map((c: { id: string }) => c.id)
+}
+
+// Get merged busy windows across the given calendar IDs for a date
+async function getBusyWindows(
+  token: string,
+  calendarIds: string[],
+  date: string
+): Promise<Array<{ start: number; end: number }>> {
+  if (calendarIds.length === 0) return []
+
+  const timeMin = new Date(date + 'T00:00:00').toISOString()
+  const timeMax = new Date(date + 'T23:59:59').toISOString()
+
+  const res = await fetch(`${GOOGLE_CALENDAR_API}/freeBusy`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      timeMin,
+      timeMax,
+      items: calendarIds.map(id => ({ id })),
+    }),
+  })
+
+  if (!res.ok) return []
+
+  const data = await res.json()
+  const allBusy: Array<{ start: number; end: number }> = []
+
+  for (const cal of Object.values(data.calendars ?? {})) {
+    for (const slot of (cal as { busy: Array<{ start: string; end: string }> }).busy ?? []) {
+      allBusy.push({
+        start: new Date(slot.start).getTime(),
+        end: new Date(slot.end).getTime(),
+      })
+    }
+  }
+
+  // Sort and merge overlapping intervals
+  allBusy.sort((a, b) => a.start - b.start)
+  const merged: Array<{ start: number; end: number }> = []
+  for (const slot of allBusy) {
+    if (merged.length > 0 && slot.start <= merged[merged.length - 1].end) {
+      merged[merged.length - 1].end = Math.max(merged[merged.length - 1].end, slot.end)
+    } else {
+      merged.push({ ...slot })
+    }
+  }
+
+  return merged
+}
+
+// Find free windows between dayStart and dayEnd that are at least minMinutes long
+function findFreeSlots(
+  busyWindows: Array<{ start: number; end: number }>,
+  dayStart: number,
+  dayEnd: number,
+  minMinutes: number
+): Array<{ start: number; end: number }> {
+  const minMs = minMinutes * 60_000
+  const free: Array<{ start: number; end: number }> = []
+  let cursor = dayStart
+
+  for (const busy of busyWindows) {
+    if (busy.start > cursor && busy.start - cursor >= minMs) {
+      free.push({ start: cursor, end: busy.start })
+    }
+    cursor = Math.max(cursor, busy.end)
+  }
+
+  if (dayEnd - cursor >= minMs) {
+    free.push({ start: cursor, end: dayEnd })
+  }
+
+  return free
+}
+
 export async function writeStudyBlocksToCalendar(
   userId: string,
   tasks: Array<{
@@ -108,14 +223,60 @@ export async function writeStudyBlocksToCalendar(
   const calendarId = await getOrCreateCogniCalendar(token, userId)
   if (!calendarId) { console.error('[calendar] could not get/create cogni calendar for user', userId); return }
 
-  // Start blocks at 9am today, sequential
-  const todayBase = new Date()
-  todayBase.setHours(9, 0, 0, 0)
-  let cursor = todayBase.getTime()
+  const today = new Date().toISOString().split('T')[0]
 
-  for (const task of tasks.sort((a, b) => a.order - b.order)) {
-    const start = new Date(cursor)
-    const end = new Date(cursor + task.duration_minutes * 60_000)
+  // 1. Clear any existing Cogni blocks for today to prevent stacking
+  await deleteCogniEventsForDate(token, calendarId, today)
+
+  // 2. Get all user calendar IDs, excluding our own Cogni calendar
+  const allCalendarIds = await listAllCalendarIds(token)
+  const otherCalendarIds = allCalendarIds.filter(id => id !== calendarId)
+
+  // 3. Get busy windows from all other calendars
+  const busyWindows = await getBusyWindows(
+    token,
+    otherCalendarIds.length > 0 ? otherCalendarIds : ['primary'],
+    today
+  )
+
+  // 4. Define study window (8am–10pm local server time)
+  const dayStart = new Date(today + `T${String(STUDY_START_HOUR).padStart(2, '0')}:00:00`).getTime()
+  const dayEnd = new Date(today + `T${String(STUDY_END_HOUR).padStart(2, '0')}:00:00`).getTime()
+
+  // 5. Find free slots of at least 15 minutes within the study window
+  const freeSlots = findFreeSlots(busyWindows, dayStart, dayEnd, 15)
+
+  if (freeSlots.length === 0) {
+    console.warn('[calendar] no free slots found for user', userId)
+    return
+  }
+
+  // 6. Place tasks into free slots in priority order
+  const sortedTasks = [...tasks].sort((a, b) => a.order - b.order)
+  const breakMs = 10 * 60_000
+
+  let slotIdx = 0
+  let slotCursor = freeSlots[0].start
+
+  for (const task of sortedTasks) {
+    const durationMs = task.duration_minutes * 60_000
+
+    // Advance through slots until we find one with enough room
+    while (slotIdx < freeSlots.length) {
+      const slot = freeSlots[slotIdx]
+      if (slotCursor < slot.start) slotCursor = slot.start
+      if (slotCursor + durationMs <= slot.end) break
+      slotIdx++
+      if (slotIdx < freeSlots.length) slotCursor = freeSlots[slotIdx].start
+    }
+
+    if (slotIdx >= freeSlots.length) {
+      console.warn(`[calendar] no free slot for "${task.course_name}" (${task.duration_minutes}min)`)
+      continue
+    }
+
+    const start = new Date(slotCursor)
+    const end = new Date(slotCursor + durationMs)
 
     await fetch(`${GOOGLE_CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events`, {
       method: 'POST',
@@ -128,33 +289,67 @@ export async function writeStudyBlocksToCalendar(
       }),
     })
 
-    cursor = end.getTime() + 10 * 60_000 // 10 min break between blocks
+    slotCursor = end.getTime() + breakMs
   }
 }
 
+// Returns events across ALL user calendars for a given date (read-only — never writes to other calendars)
 export async function getExistingEvents(
   userId: string,
   date: string
-): Promise<Array<{ start: string; end: string; summary: string }>> {
+): Promise<Array<{ start: string; end: string; summary: string; calendarId: string }>> {
   const token = await getGoogleToken(userId)
   if (!token) return []
+
+  const calendarIds = await listAllCalendarIds(token)
+  if (calendarIds.length === 0) return []
 
   const timeMin = new Date(date + 'T00:00:00').toISOString()
   const timeMax = new Date(date + 'T23:59:59').toISOString()
 
-  const res = await fetch(
-    `${GOOGLE_CALENDAR_API}/calendars/primary/events?timeMin=${timeMin}&timeMax=${timeMax}&singleEvents=true`,
-    { headers: { Authorization: `Bearer ${token}` } }
+  const results: Array<{ start: string; end: string; summary: string; calendarId: string }> = []
+
+  await Promise.all(
+    calendarIds.map(async calId => {
+      const res = await fetch(
+        `${GOOGLE_CALENDAR_API}/calendars/${encodeURIComponent(calId)}/events?timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}&singleEvents=true&maxResults=250`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+      if (!res.ok) return
+      const data = await res.json()
+      for (const e of data.items ?? []) {
+        results.push({
+          summary: e.summary ?? '',
+          start: e.start?.dateTime ?? e.start?.date ?? '',
+          end: e.end?.dateTime ?? e.end?.date ?? '',
+          calendarId: calId,
+        })
+      }
+    })
   )
 
-  if (!res.ok) return []
+  return results.sort((a, b) => a.start.localeCompare(b.start))
+}
 
-  const data = await res.json()
-  return (data.items ?? []).map((e: { summary?: string; start?: { dateTime?: string }; end?: { dateTime?: string } }) => ({
-    summary: e.summary ?? '',
-    start: e.start?.dateTime ?? '',
-    end: e.end?.dateTime ?? '',
-  }))
+// Deletes the Cogni Study calendar from Google. Called on disconnect so reconnects don't create duplicates.
+export async function cleanupCogniCalendar(userId: string): Promise<void> {
+  const service = createServiceClient()
+  const { data } = await service
+    .from('calendar_connections')
+    .select('cogni_calendar_id')
+    .eq('user_id', userId)
+    .eq('provider', 'google')
+    .single()
+
+  if (!data?.cogni_calendar_id) return
+
+  const token = await getGoogleToken(userId)
+  if (!token) return
+
+  await fetch(`${GOOGLE_CALENDAR_API}/calendars/${encodeURIComponent(data.cogni_calendar_id)}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  })
 }
 
 export async function isGoogleCalendarConnected(userId: string): Promise<boolean> {

@@ -108,7 +108,7 @@ export async function POST(request: Request) {
   const service2 = createServiceClient()
   const { data: courseRow } = await service2
     .from('courses')
-    .select('course_type')
+    .select('course_type, professor_id')
     .eq('course_id', courseId)
     .single()
 
@@ -122,6 +122,7 @@ export async function POST(request: Request) {
         essayMode: !!essayContent,
         assistanceLevel,
         courseType: courseRow?.course_type ?? undefined,
+        professorId: courseRow?.professor_id ?? undefined,
         ragContext,
       })
     })(),
@@ -273,23 +274,31 @@ export async function POST(request: Request) {
           }
 
           if (deepThink) {
-            streamParams.thinking = { type: 'enabled', budget_tokens: 8000 }
+            // Opus 4.7 rejects thinking.type=enabled; uses adaptive + effort instead.
+            streamParams.thinking = { type: 'adaptive' }
+            streamParams.output_config = { effort: 'high' }
           }
 
           const stream = client.messages.stream(streamParams)
           const toolInputs = new Map<number, { id: string; name: string; inputJson: string }>()
+          const thinkingIndices = new Set<number>()
 
           for await (const event of stream) {
             if (event.type === 'content_block_start') {
-              if (event.content_block.type === 'tool_use') {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const cb = event.content_block as any
+              if (cb.type === 'thinking') {
+                thinkingIndices.add(event.index)
+                controller.enqueue(emit({ t: 'think_start' }))
+              } else if (cb.type === 'tool_use' || cb.type === 'server_tool_use') {
                 toolInputs.set(event.index, {
-                  id: event.content_block.id,
-                  name: event.content_block.name,
+                  id: cb.id,
+                  name: cb.name,
                   inputJson: '',
                 })
-                // Emit search start immediately so the UI appears while we wait for the query
-                if (event.content_block.name === 'web_search') {
-                  controller.enqueue(emit({ t: 'search', q: '…' }))
+                if (cb.name === 'web_search') {
+                  console.log('[tutor] web_search invoked, block type:', cb.type)
+                  controller.enqueue(emit({ t: 'search_start' }))
                 }
               }
             } else if (event.type === 'content_block_delta') {
@@ -299,19 +308,23 @@ export async function POST(request: Request) {
                 fullText += delta.text
                 controller.enqueue(emit({ t: 'text', c: delta.text }))
               } else if (delta.type === 'thinking_delta') {
-                controller.enqueue(emit({ t: 'think', c: delta.thinking }))
+                controller.enqueue(emit({ t: 'think_delta', c: delta.thinking }))
               } else if (delta.type === 'input_json_delta') {
                 const blk = toolInputs.get(event.index)
                 if (blk) blk.inputJson += delta.partial_json
               }
             } else if (event.type === 'content_block_stop') {
-              // Update search event with actual query once we have the full JSON
+              if (thinkingIndices.has(event.index)) {
+                controller.enqueue(emit({ t: 'think_stop' }))
+              }
               const blk = toolInputs.get(event.index)
               if (blk?.name === 'web_search') {
+                let query = ''
                 try {
                   const input = JSON.parse(blk.inputJson) as { query: string }
-                  if (input.query) controller.enqueue(emit({ t: 'search', q: input.query }))
-                } catch { /* keep the placeholder '…' shown at start */ }
+                  query = input.query ?? ''
+                } catch { /* no query available */ }
+                controller.enqueue(emit({ t: 'search_done', q: query }))
               }
             }
           }
@@ -362,11 +375,15 @@ export async function POST(request: Request) {
                   )
                 } catch { /* non-critical */ }
 
-                toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: `Created ${input.cards.length} flashcards on "${input.topic}" and saved them to the student's deck. Tell the student they're ready and have been added to spaced repetition.` })
+                const cardList = input.cards.map((c, i) => `${i + 1}. Front: ${c.front} | Back: ${c.back}`).join('\n')
+                toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: `Created ${input.cards.length} flashcards on "${input.topic}" and saved them to the student's deck. Tell the student they're ready and have been added to spaced repetition.\n\nCards you created:\n${cardList}` })
               } else if (block.name === 'create_quiz') {
                 const input = block.input as { topic: string; questions: object[] }
                 controller.enqueue(emit({ t: 'card', kind: 'quiz', topic: input.topic, count: input.questions.length, data: input.questions }))
-                toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: `Created ${input.questions.length} quiz questions on "${input.topic}". Tell the student the quiz is ready.` })
+                const questionList = (input.questions as Array<{ question: string; answer: string; explanation: string }>)
+                  .map((q, i) => `${i + 1}. ${q.question}\n   Answer: ${q.answer}\n   Explanation: ${q.explanation}`)
+                  .join('\n\n')
+                toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: `Created ${input.questions.length} quiz questions on "${input.topic}". Tell the student the quiz is ready.\n\nQuestions you created:\n${questionList}` })
               } else if (block.name === 'grade_answer') {
                 const input = block.input as { topic_name: string; score: number; rationale: string }
                 const service = createServiceClient()
@@ -412,6 +429,15 @@ export async function POST(request: Request) {
           }
         }
 
+        if (!fullText.trim()) {
+          console.error('[tutor] empty response', {
+            model: deepThink ? 'claude-opus-4-7' : 'claude-sonnet-4-6',
+            deepThink,
+            iterations,
+          })
+          controller.enqueue(emit({ t: 'error', c: `Empty response from model (${deepThink ? 'Opus 4.7' : 'Sonnet 4.6'}). Check server logs.` }))
+        }
+
         controller.close()
         await saveMessage(sessionId, user.id, 'assistant', fullText)
 
@@ -420,7 +446,8 @@ export async function POST(request: Request) {
           autoNameSession(sessionId, user.id, `Student: ${message}\nTutor: ${fullText}`, apiKey)
         }
       } catch (err) {
-        controller.enqueue(emit({ t: 'error', c: String(err) }))
+        console.error('[tutor] stream error', err)
+        controller.enqueue(emit({ t: 'error', c: err instanceof Error ? err.message : String(err) }))
         controller.close()
       }
     },
