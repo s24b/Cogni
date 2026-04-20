@@ -130,33 +130,32 @@ export async function runScheduler(userId: string): Promise<void> {
     })
   }
 
-  if (scored.length === 0) return
-
-  const totalPriority = scored.reduce((sum, c) => sum + c.priority, 0)
   const tasks: TaskItem[] = []
 
-  scored
-    .sort((a, b) => b.priority - a.priority)
-    .forEach((course, i) => {
-      const share = totalPriority > 0 ? course.priority / totalPriority : 1 / scored.length
-      const cappedShare = Math.min(0.7, Math.max(share, scored.length === 1 ? 1 : 0.1))
-      const duration = Math.round(sessionMinutes * cappedShare)
-
-      if (duration < 5) return
-
-      tasks.push({
-        type: 'flashcard_review',
-        course_id: course.course_id,
-        course_name: course.course_name,
-        topic_ids: course.topic_ids,
-        card_count: course.card_count,
-        duration_minutes: duration,
-        priority_score: Math.round(course.priority * 100) / 100,
-        order: i + 1,
+  // Flashcard review blocks (only if courses have extracted topics)
+  if (scored.length > 0) {
+    const totalPriority = scored.reduce((sum, c) => sum + c.priority, 0)
+    scored
+      .sort((a, b) => b.priority - a.priority)
+      .forEach((course, i) => {
+        const share = totalPriority > 0 ? course.priority / totalPriority : 1 / scored.length
+        const cappedShare = Math.min(0.7, Math.max(share, scored.length === 1 ? 1 : 0.1))
+        const duration = Math.round(sessionMinutes * cappedShare)
+        if (duration < 5) return
+        tasks.push({
+          type: 'flashcard_review',
+          course_id: course.course_id,
+          course_name: course.course_name,
+          topic_ids: course.topic_ids,
+          card_count: course.card_count,
+          duration_minutes: duration,
+          priority_score: Math.round(course.priority * 100) / 100,
+          order: i + 1,
+        })
       })
-    })
+  }
 
-  // Homework blocks — due today or overdue, not yet completed
+  // Homework blocks — due today or overdue, not yet completed (independent of topic extraction)
   const tomorrow = new Date(today)
   tomorrow.setDate(tomorrow.getDate() + 1)
   const tomorrowStr = tomorrow.toISOString().split('T')[0]
