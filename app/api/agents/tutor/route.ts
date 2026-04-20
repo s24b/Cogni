@@ -100,7 +100,10 @@ export async function POST(request: Request) {
     ?? (forceNew
       ? await createSession(user.id, courseId, mode)
       : await getOrCreateSession(user.id, courseId, mode))
-  await saveMessage(sessionId, user.id, 'user', message)
+  const savedUserContent = attachments.length > 0
+    ? `[att:${attachments.map(a => a.name).join('|')}]\n${message}`
+    : message
+  await saveMessage(sessionId, user.id, 'user', savedUserContent)
 
   const service2 = createServiceClient()
   const { data: courseRow } = await service2
@@ -248,7 +251,8 @@ export async function POST(request: Request) {
         const messages: Anthropic.MessageParam[] = [
           ...priorMessages.map((m: { role: string; content: string }) => ({
             role: m.role as 'user' | 'assistant',
-            content: m.content,
+            // Strip attachment metadata prefix before sending to model
+            content: m.role === 'user' ? m.content.replace(/^\[att:[^\]]+\]\n/, '') : m.content,
           })),
           { role: 'user', content: userContent },
         ]
@@ -283,6 +287,10 @@ export async function POST(request: Request) {
                   name: event.content_block.name,
                   inputJson: '',
                 })
+                // Emit search start immediately so the UI appears while we wait for the query
+                if (event.content_block.name === 'web_search') {
+                  controller.enqueue(emit({ t: 'search', q: '…' }))
+                }
               }
             } else if (event.type === 'content_block_delta') {
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -297,13 +305,13 @@ export async function POST(request: Request) {
                 if (blk) blk.inputJson += delta.partial_json
               }
             } else if (event.type === 'content_block_stop') {
-              // Emit search UI event once we have the full query
+              // Update search event with actual query once we have the full JSON
               const blk = toolInputs.get(event.index)
               if (blk?.name === 'web_search') {
                 try {
                   const input = JSON.parse(blk.inputJson) as { query: string }
-                  controller.enqueue(emit({ t: 'search', q: input.query }))
-                } catch { /* malformed */ }
+                  if (input.query) controller.enqueue(emit({ t: 'search', q: input.query }))
+                } catch { /* keep the placeholder '…' shown at start */ }
               }
             }
           }

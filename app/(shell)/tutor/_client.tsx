@@ -83,7 +83,56 @@ const MODES: { value: Mode; label: string; Icon: React.ElementType; tip: string;
   },
 ]
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function parseAttachmentMeta(content: string): { names: string[]; text: string } {
+  const m = /^\[att:([^\]]+)\]\n/.exec(content)
+  if (!m) return { names: [], text: content }
+  return { names: m[1].split('|').filter(Boolean), text: content.slice(m[0].length) }
+}
+
 // ── Sub-components ────────────────────────────────────────────────────────────
+
+function UserBubble({ msg }: { msg: Message }) {
+  const { names: loadedNames, text: displayText } = msg.attachments
+    ? { names: [], text: msg.content }
+    : parseAttachmentMeta(msg.content)
+
+  return (
+    <div className="flex flex-col items-end gap-1.5">
+      {/* Live attachment chips (just sent) */}
+      {msg.attachments && msg.attachments.length > 0 && (
+        <div className="flex flex-wrap justify-end gap-1.5">
+          {msg.attachments.map((att, j) => (
+            <div key={j} className="flex items-center gap-1.5 rounded-lg border border-border bg-muted px-2 py-1">
+              {att.preview ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={att.preview} alt={att.name} className="size-3.5 rounded object-cover" />
+              ) : (
+                <Paperclip size={11} className="text-muted-foreground" />
+              )}
+              <span className="max-w-28 truncate text-[10px] text-muted-foreground">{att.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {/* Placeholder chips for attachments loaded from history */}
+      {!msg.attachments && loadedNames.length > 0 && (
+        <div className="flex flex-wrap justify-end gap-1.5">
+          {loadedNames.map((name, j) => (
+            <div key={j} className="flex items-center gap-1.5 rounded-lg border border-border bg-muted px-2 py-1">
+              <Paperclip size={11} className="text-muted-foreground" />
+              <span className="max-w-28 truncate text-[10px] text-muted-foreground">{name}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-primary px-4 py-2 text-sm leading-normal text-primary-foreground">
+        {displayText}
+      </div>
+    </div>
+  )
+}
 
 function InlineCardChip({ card, onExpand }: { card: InlineCard; onExpand: () => void }) {
   return (
@@ -769,6 +818,13 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
                   }
                   return updated
                 })
+              } else if (event.t === 'error') {
+                const errMsg = event.c ?? 'Something went wrong'
+                setMessages(prev => {
+                  const updated = [...prev]
+                  updated[updated.length - 1] = { role: 'assistant', content: `Error: ${errMsg}` }
+                  return updated
+                })
               }
             } catch {
               // non-JSON line, ignore
@@ -1036,27 +1092,7 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
                 {msg.role === 'system' ? (
                   <SystemNotice content={msg.content} />
                 ) : msg.role === 'user' ? (
-                  <div className="flex flex-col items-end gap-1.5">
-                    {/* Attached file chips */}
-                    {msg.attachments && msg.attachments.length > 0 && (
-                      <div className="flex flex-wrap justify-end gap-1.5">
-                        {msg.attachments.map((att, j) => (
-                          <div key={j} className="flex items-center gap-1.5 rounded-lg border border-border bg-muted px-2 py-1">
-                            {att.preview ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img src={att.preview} alt={att.name} className="size-3.5 rounded object-cover" />
-                            ) : (
-                              <Paperclip size={11} className="text-muted-foreground" />
-                            )}
-                            <span className="max-w-28 truncate text-[10px] text-muted-foreground">{att.name}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl bg-primary px-4 py-2 text-sm leading-normal text-primary-foreground">
-                      {msg.content}
-                    </div>
-                  </div>
+                  <UserBubble msg={msg} />
                 ) : (
                   /* Assistant message */
                   <div className="flex w-full flex-col items-start gap-2">
