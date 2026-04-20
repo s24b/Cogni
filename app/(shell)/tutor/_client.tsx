@@ -30,6 +30,7 @@ import {
   WarningCircle,
   MinusCircle,
   PencilSimple,
+  Key,
 } from '@phosphor-icons/react'
 import { StaggerList, StaggerItem, ease } from '@/components/ui/motion'
 import { BorderBeam } from 'border-beam'
@@ -336,7 +337,7 @@ function readAsBase64(file: File): Promise<string> {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function TutorClient({ courses, sessions: initialSessions }: { courses: Course[]; sessions: Session[] }) {
+export function TutorClient({ courses, sessions: initialSessions, hasApiKey = true }: { courses: Course[]; sessions: Session[]; hasApiKey?: boolean }) {
   const [sessions, setSessions] = useState<Session[]>(initialSessions)
   const [activeCourse, setActiveCourse] = useState<Course | null>(null)
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
@@ -888,6 +889,16 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
           <p className="mt-1 text-sm text-muted-foreground">Pick a course to start a session.</p>
         </div>
 
+        {!hasApiKey && (
+          <div className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800/40 dark:bg-amber-950/20">
+            <Key size={14} className="shrink-0 text-amber-600 dark:text-amber-400" weight="fill" />
+            <p className="text-sm text-amber-800 dark:text-amber-300">
+              No Anthropic API key set — add one in{' '}
+              <a href="/settings" className="underline underline-offset-2">Settings</a> to use the Tutor.
+            </p>
+          </div>
+        )}
+
         <div className="flex flex-col gap-2">
           <p className="text-xs font-semibold text-muted-foreground">Your courses</p>
           {courses.length === 0 ? (
@@ -935,7 +946,7 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
                     <button
                       onClick={e => { e.stopPropagation(); deleteSession(session.session_id) }}
                       className="mr-2 flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30 transition-all"
-                      title="Delete session"
+                      aria-label="Delete session"
                     >
                       <Trash size={13} />
                     </button>
@@ -981,7 +992,7 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
               <button
                 onClick={() => deleteSession(activeSessionId)}
                 className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/30 transition-colors"
-                title="Delete this session"
+                aria-label="Delete session"
               >
                 <Trash size={14} />
               </button>
@@ -1103,7 +1114,7 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
                       <Paperclip size={12} className="text-muted-foreground" />
                     )}
                     <span className="max-w-28 truncate text-foreground">{att.name}</span>
-                    <button onClick={() => removeAttachment(i)} className="text-muted-foreground hover:text-foreground transition-colors">
+                    <button onClick={() => removeAttachment(i)} aria-label="Remove attachment" className="text-muted-foreground hover:text-foreground transition-colors">
                       <X size={11} />
                     </button>
                   </div>
@@ -1142,7 +1153,7 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
                         </div>
                       </div>
                       <div className={`h-5 w-9 rounded-full transition-colors ${deepThink ? 'bg-violet-500' : 'bg-muted-foreground/30'}`}>
-                        <div className={`mt-0.5 size-4 rounded-full bg-white shadow transition-transform ${deepThink ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                        <div className={`mt-0.5 size-4 rounded-full bg-background shadow transition-transform ${deepThink ? 'translate-x-4' : 'translate-x-0.5'}`} />
                       </div>
                     </button>
 
@@ -1192,6 +1203,7 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
                 <div className="flex items-center gap-0.5 shrink-0">
                   <button
                     onClick={() => setShowOptions(p => !p)}
+                    aria-label="Options"
                     className={`flex size-8 items-center justify-center rounded-lg transition-colors ${
                       showOptions ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
                     }`}
@@ -1212,6 +1224,7 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
                   />
                   <button
                     onClick={() => fileInputRef.current?.click()}
+                    aria-label="Attach file"
                     className="flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
                   >
                     <Paperclip size={16} />
@@ -1235,6 +1248,7 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
                 <div className="flex items-center gap-1 shrink-0">
                   <button
                     onClick={startVoice}
+                    aria-label="Voice input"
                     className="flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
                   >
                     <Microphone size={16} />
@@ -1242,6 +1256,7 @@ export function TutorClient({ courses, sessions: initialSessions }: { courses: C
                   <button
                     onClick={sendMessage}
                     disabled={!input.trim() || sending}
+                    aria-label="Send message"
                     className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground disabled:opacity-40 hover:bg-primary/90 transition-colors"
                   >
                     {sending

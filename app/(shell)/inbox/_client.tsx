@@ -105,6 +105,7 @@ function StagedItemRow({
         {!item.done && (
           <button
             onClick={onRemove}
+            aria-label="Remove"
             className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground transition-colors"
           >
             <X size={13} />
@@ -370,7 +371,7 @@ export function InboxClient({ items: initialItems, courses }: { items: InboxItem
                   {(item.classification_status === 'unassigned' || item.classification_status === 'failed') && (
                     <button
                       onClick={() => dismissItem(item.inbox_item_id)}
-                      title="Dismiss"
+                      aria-label="Dismiss"
                       className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground transition-colors"
                     >
                       <X size={13} />

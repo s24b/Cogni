@@ -369,6 +369,7 @@ function AudioPlayer({ url, estimatedMinutes }: { url: string; estimatedMinutes:
       <div className="flex items-center gap-3">
         <button
           onClick={togglePlay}
+          aria-label={playing ? 'Pause' : 'Play'}
           className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
         >
           {playing
@@ -635,6 +636,7 @@ export function CourseDetailClient({
         <div className="flex items-center gap-3 border-b border-border px-5 py-4 shrink-0">
           <button
             onClick={() => router.back()}
+            aria-label="Back"
             className="flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
           >
             <ArrowLeft size={16} />
@@ -650,8 +652,8 @@ export function CourseDetailClient({
           </div>
           <button
             onClick={() => setShowArchiveModal(true)}
+            aria-label="Archive course"
             className="flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
-            title="Archive course"
           >
             <Archive size={16} />
           </button>

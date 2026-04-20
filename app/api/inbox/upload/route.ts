@@ -1,5 +1,6 @@
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { classifyMaterial } from '@/lib/agents/inbox'
+import { runScheduler } from '@/lib/agents/scheduler'
 import { NextResponse } from 'next/server'
 
 export async function POST(request: Request) {
@@ -109,6 +110,9 @@ export async function POST(request: Request) {
     context,
     courseIdHint,
   )
+
+  // Fire-and-forget: rerun scheduler so today's plan reflects the new material
+  runScheduler(user.id).catch(() => {})
 
   return NextResponse.json({ ok: true, inbox_item_id: inboxItem.inbox_item_id, ...result })
 }

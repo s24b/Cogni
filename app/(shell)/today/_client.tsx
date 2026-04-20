@@ -119,8 +119,8 @@ function NudgeCard({ nudge, onDismiss }: { nudge: ActiveNudge; onDismiss: () => 
         <button
           disabled={loading}
           onClick={() => handleAction(nudge.tier === 'recurring' ? 'resolve' : 'snooze')}
+          aria-label={nudge.tier === 'recurring' ? 'Mark done' : 'Snooze'}
           className="shrink-0 rounded-lg p-1.5 text-muted-foreground hover:bg-muted/50 transition-colors disabled:opacity-50"
-          title={nudge.tier === 'recurring' ? 'Mark done' : 'Snooze 7 days'}
         >
           <X size={14} />
         </button>

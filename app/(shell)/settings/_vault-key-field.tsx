@@ -80,6 +80,7 @@ export function VaultKeyField({
           </button>
           <button
             onClick={remove}
+            aria-label="Delete API key"
             className="flex size-9 items-center justify-center rounded-lg border border-border text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
           >
             <X size={14} />
@@ -99,6 +100,7 @@ export function VaultKeyField({
             <button
               type="button"
               onClick={() => setShow(s => !s)}
+              aria-label={show ? 'Hide key' : 'Show key'}
               className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
             >
               {show ? <EyeSlash size={14} /> : <Eye size={14} />}

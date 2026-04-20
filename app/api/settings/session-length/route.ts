@@ -1,4 +1,5 @@
 import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { runScheduler } from '@/lib/agents/scheduler'
 import { NextResponse } from 'next/server'
 
 export async function PATCH(request: Request) {
@@ -13,6 +14,9 @@ export async function PATCH(request: Request) {
 
   const service = createServiceClient()
   await service.from('users').update({ session_length_preference: sessionLength }).eq('user_id', user.id)
+
+  // Rerun scheduler so daily plan uses the updated session length
+  runScheduler(user.id).catch(() => {})
 
   return NextResponse.json({ ok: true })
 }

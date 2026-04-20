@@ -1,6 +1,7 @@
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { TutorClient } from './_client'
+import { getUserApiKey } from '@/lib/vault'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,7 +12,7 @@ export default async function TutorPage() {
 
   const service = createServiceClient()
 
-  const [{ data: courses }, { data: sessions }] = await Promise.all([
+  const [{ data: courses }, { data: sessions }, anthropicKey] = await Promise.all([
     service
       .from('courses')
       .select('course_id, name, professors(name)')
@@ -24,7 +25,8 @@ export default async function TutorPage() {
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(20),
+    getUserApiKey(user.id),
   ])
 
-  return <TutorClient courses={courses ?? []} sessions={sessions ?? []} />
+  return <TutorClient courses={courses ?? []} sessions={sessions ?? []} hasApiKey={!!anthropicKey} />
 }
