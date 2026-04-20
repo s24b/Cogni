@@ -1,10 +1,29 @@
-export default function ProgressPage() {
-  return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
-      <p className="font-heading text-lg font-semibold text-foreground">Progress</p>
-      <p className="max-w-xs text-sm text-muted-foreground">
-        Mastery trends, weak areas, and exam score predictions will appear here as you study.
-      </p>
-    </div>
-  )
+import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { redirect } from 'next/navigation'
+import { ProgressClient } from './_client'
+
+export default async function ProgressPage() {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/auth')
+
+  const service = createServiceClient()
+
+  const { data: results } = await service
+    .from('practice_test_results')
+    .select(`
+      result_id,
+      test_type,
+      score_pct,
+      question_count,
+      correct_count,
+      topic_filter,
+      created_at,
+      courses ( name )
+    `)
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
+    .limit(50)
+
+  return <ProgressClient results={results ?? []} />
 }

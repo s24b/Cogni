@@ -10,6 +10,7 @@ import {
   CircleNotch,
   Cards,
   BookOpen,
+  ClipboardText,
 } from '@phosphor-icons/react'
 import { StaggerList, StaggerItem, ease } from '@/components/ui/motion'
 
@@ -109,6 +110,7 @@ function TopicRow({ topic, courseId }: { topic: Topic; courseId: string }) {
 }
 
 function CourseCard({ course }: { course: Course }) {
+  const router = useRouter()
   const [open, setOpen] = useState(true)
 
   return (
@@ -128,6 +130,13 @@ function CourseCard({ course }: { course: Course }) {
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span>{course.topics.length} topics</span>
+          <button
+            onClick={e => { e.stopPropagation(); router.push(`/courses/${course.course_id}`) }}
+            className="flex items-center gap-1 rounded-lg bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/20 transition-colors"
+          >
+            <ClipboardText size={11} weight="fill" />
+            Practice
+          </button>
           {open ? <CaretDown size={14} /> : <CaretRight size={14} />}
         </div>
       </button>
