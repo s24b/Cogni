@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import OnboardingClient from './_client'
 
@@ -21,5 +21,13 @@ export default async function OnboardingPage() {
     user.user_metadata?.name ??
     ''
 
-  return <OnboardingClient googleName={googleName} />
+  const service = createServiceClient()
+  const { data: calRow } = await service
+    .from('calendar_connections')
+    .select('connection_id')
+    .eq('user_id', user.id)
+    .eq('provider', 'google')
+    .maybeSingle()
+
+  return <OnboardingClient googleName={googleName} calendarConnected={!!calRow} />
 }

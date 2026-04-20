@@ -17,6 +17,7 @@ import {
   BookOpen,
   UploadSimple,
   CalendarBlank,
+  GoogleLogo,
   Plus,
   X,
   CaretLeft,
@@ -140,7 +141,7 @@ function loadSaved(): SavedState | null {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function OnboardingClient({ googleName }: { googleName: string }) {
+export default function OnboardingClient({ googleName, calendarConnected }: { googleName: string; calendarConnected: boolean }) {
   const router = useRouter()
   const supabase = createClient()
 
@@ -422,7 +423,7 @@ export default function OnboardingClient({ googleName }: { googleName: string })
                       setSyllabuses={setSyllabuses}
                     />
                   )}
-                  {step === 5 && <StepCalendar />}
+                  {step === 5 && <StepCalendar calendarConnected={calendarConnected} />}
                 </motion.div>
               )}
             </AnimatePresence>
@@ -848,7 +849,7 @@ function StepSyllabuses({
   )
 }
 
-function StepCalendar() {
+function StepCalendar({ calendarConnected }: { calendarConnected: boolean }) {
   return (
     <div className="space-y-6">
       <div>
@@ -856,39 +857,37 @@ function StepCalendar() {
           Connect your calendar.
         </h1>
         <p className="mt-1 text-sm text-muted-foreground md:text-base">
-          Cogni schedules study blocks around your existing events. You can connect later in Settings.
+          Cogni schedules study blocks around your existing events. You can also do this later in Settings.
         </p>
       </div>
 
-      <div className="space-y-3">
-        {[
-          { name: 'Google Calendar', sub: 'Most popular' },
-          { name: 'Apple Calendar', sub: 'iCloud / CalDAV' },
-          { name: 'Outlook', sub: 'Microsoft 365' },
-        ].map(cal => (
-          <div
-            key={cal.name}
-            className="flex items-center justify-between rounded-xl border border-border px-4 py-3"
+      <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/30 px-4 py-3">
+        <div className="flex size-8 items-center justify-center rounded-lg bg-background border border-border shrink-0">
+          <GoogleLogo size={16} weight="fill" className="text-foreground" />
+        </div>
+        <div className="flex flex-1 flex-col min-w-0">
+          <span className="text-sm font-medium text-foreground">Google Calendar</span>
+          {calendarConnected ? (
+            <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+              <CheckCircle size={11} weight="fill" />
+              Connected — study blocks will appear in &quot;Cogni Study&quot;
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">Not connected</span>
+          )}
+        </div>
+        {!calendarConnected && (
+          <a
+            href="/api/calendar/connect"
+            className="shrink-0 flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
           >
-            <div>
-              <p className="text-sm font-medium text-foreground">{cal.name}</p>
-              <p className="text-xs text-muted-foreground">{cal.sub}</p>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled
-              className="text-xs"
-              title="Calendar integration available after onboarding in Settings"
-            >
-              Connect
-            </Button>
-          </div>
-        ))}
+            Connect
+          </a>
+        )}
       </div>
 
       <p className="text-xs text-muted-foreground">
-        Calendar integration is set up in Settings — come back after you&apos;re in.
+        You can also connect or disconnect later in Settings → Calendar.
       </p>
     </div>
   )

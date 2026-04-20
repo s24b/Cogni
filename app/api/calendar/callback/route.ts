@@ -1,7 +1,8 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const url = new URL(request.url)
   const code = url.searchParams.get('code')
   const userId = url.searchParams.get('state')
@@ -39,5 +40,8 @@ export async function GET(request: Request) {
     updated_at: new Date().toISOString(),
   }, { onConflict: 'user_id,provider' })
 
-  return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/settings?calendar=connected`)
+  // Redirect back to onboarding if the user hasn't completed it yet (no users row)
+  const { data: userRow } = await service.from('users').select('user_id').eq('user_id', userId).maybeSingle()
+  const returnPath = userRow ? '/settings?calendar=connected' : '/onboarding?calendar=connected'
+  return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}${returnPath}`)
 }
