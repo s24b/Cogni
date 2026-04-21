@@ -102,7 +102,7 @@ Do NOT ask verification or check-your-understanding questions. The student wants
   const essaySection = opts?.essayMode ? buildEssaySection(opts.assistanceLevel ?? 'suggest', opts.courseType) : ''
 
   const ragSection = opts?.ragContext
-    ? `\n## Retrieved course material\nThe following excerpts from the student's uploaded materials are relevant to their question. Prefer this over general knowledge when answering.\n\n${opts.ragContext}`
+    ? `\n## Retrieved course material\nThe following excerpts come directly from the student's uploaded course files. Treat this as authoritative — it overrides your general knowledge. Do NOT contradict, second-guess, or "correct" information found here based on what you think is standard. If the file says something unusual (e.g. a non-standard constant, a professor-specific rule), trust it and relay it accurately.\n\n${opts.ragContext}`
     : ''
 
   const professorSection = professorWiki

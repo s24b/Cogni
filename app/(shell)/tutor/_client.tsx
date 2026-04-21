@@ -880,9 +880,12 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
   function handleQuizComplete(summary: GradeSummary) {
     const topic = splitContent?.topic ?? 'the quiz'
     const total = splitContent?.count ?? summary.correctCount
-    const missedParts = summary.missedTopics.length > 0
+    const allCorrect = total > 0 && summary.correctCount === total
+    const missedParts = allCorrect
+      ? ' I got everything right.'
+      : summary.missedTopics.length > 0
       ? ` I struggled most with: ${summary.missedTopics.map(t => `${t.topic} (${t.wrongCount} wrong)`).join(', ')}.`
-      : ' I got everything right.'
+      : ''
     const text = `I just finished the quiz on ${topic}. I got ${summary.correctCount} out of ${total} correct (${Math.round(summary.scorePct)}%).${missedParts} Can you review my results and help me understand what to work on?`
     sendMessage(text)
   }
