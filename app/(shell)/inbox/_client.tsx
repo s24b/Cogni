@@ -15,6 +15,7 @@ import {
   ArrowRight,
   Keyboard,
   Check,
+  CalendarBlank,
 } from '@phosphor-icons/react'
 
 type InboxItem = {
@@ -41,6 +42,12 @@ type StagedItem = {
   name: string
   error?: string
   done?: boolean
+  // Homework due date confirmation
+  awaitingDueDate?: boolean
+  detectedDueDate?: string | null  // YYYY-MM-DD or null
+  confirmedDueDate?: string        // user-confirmed date
+  inboxItemId?: string
+  courseId?: string | null
 }
 
 const TIER_LABEL: Record<number, string> = {
@@ -87,22 +94,36 @@ function StagedItemRow({
   item,
   onRemove,
   onChange,
+  onConfirmDueDate,
+  onSkipDueDate,
 }: {
   item: StagedItem
   onRemove: () => void
   onChange: (patch: Partial<StagedItem>) => void
+  onConfirmDueDate: (date: string) => void
+  onSkipDueDate: () => void
 }) {
+  const [dateInput, setDateInput] = useState(item.detectedDueDate ?? '')
+  const [confirmingDate, setConfirmingDate] = useState(false)
+
   return (
-    <div className={`flex flex-col gap-2 rounded-xl border bg-card px-4 py-3 ${item.done ? 'border-emerald-500/40 opacity-60' : item.error ? 'border-red-400/40' : 'border-border'}`}>
+    <div className={`flex flex-col gap-2 rounded-xl border bg-card px-4 py-3 ${
+      item.done ? 'border-emerald-500/40 opacity-60'
+      : item.awaitingDueDate ? 'border-amber-400/40'
+      : item.error ? 'border-red-400/40'
+      : 'border-border'
+    }`}>
       <div className="flex items-center gap-2">
         {item.done
           ? <Check size={16} className="text-emerald-500 shrink-0" weight="bold" />
-          : item.type === 'text'
-            ? <Keyboard size={16} className="text-primary shrink-0" weight="fill" />
-            : <FileIcon fileType={item.file?.name.endsWith('.pdf') ? 'pdf' : 'txt'} />
+          : item.awaitingDueDate
+            ? <CalendarBlank size={16} className="text-amber-500 shrink-0" weight="fill" />
+            : item.type === 'text'
+              ? <Keyboard size={16} className="text-primary shrink-0" weight="fill" />
+              : <FileIcon fileType={item.file?.name.endsWith('.pdf') ? 'pdf' : 'txt'} />
         }
         <span className="flex-1 text-sm font-medium text-foreground truncate">{item.name}</span>
-        {!item.done && (
+        {!item.done && !item.awaitingDueDate && (
           <button
             onClick={onRemove}
             aria-label="Remove"
@@ -113,7 +134,44 @@ function StagedItemRow({
         )}
       </div>
 
-      {!item.done && item.type === 'text' && (
+      {item.awaitingDueDate && (
+        <div className="flex flex-col gap-2 rounded-lg bg-amber-500/5 border border-amber-400/20 px-3 py-2.5">
+          <p className="text-xs text-amber-700 dark:text-amber-400 font-medium">
+            {item.detectedDueDate
+              ? `Homework detected — we found a due date: ${new Date(item.detectedDueDate + 'T12:00:00').toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}. Confirm or adjust below.`
+              : 'Homework detected — no due date found in the file. Set one manually or skip.'}
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={dateInput}
+              onChange={e => setDateInput(e.target.value)}
+              className="flex-1 rounded-lg border border-border bg-card px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+            />
+            <button
+              onClick={async () => {
+                if (!dateInput) return
+                setConfirmingDate(true)
+                await onConfirmDueDate(dateInput)
+                setConfirmingDate(false)
+              }}
+              disabled={!dateInput || confirmingDate}
+              className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-40 transition-opacity"
+            >
+              {confirmingDate ? <CircleNotch size={11} className="animate-spin" /> : <Check size={11} weight="bold" />}
+              Confirm
+            </button>
+            <button
+              onClick={onSkipDueDate}
+              className="rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted/50 transition-colors"
+            >
+              Skip
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!item.done && !item.awaitingDueDate && item.type === 'text' && (
         <textarea
           value={item.textContent}
           onChange={e => onChange({ textContent: e.target.value })}
@@ -123,7 +181,7 @@ function StagedItemRow({
         />
       )}
 
-      {!item.done && (
+      {!item.done && !item.awaitingDueDate && (
         <input
           type="text"
           value={item.context}
@@ -200,6 +258,26 @@ export function InboxClient({ items: initialItems, courses }: { items: InboxItem
     await fetch(`/api/inbox/items/${itemId}`, { method: 'DELETE' })
   }
 
+  async function confirmDueDate(stagedId: string, date: string) {
+    const item = staged.find(s => s.id === stagedId)
+    if (!item?.courseId || !item.inboxItemId) {
+      updateItem(stagedId, { done: true, awaitingDueDate: false })
+      return
+    }
+    await fetch('/api/assignments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ course_id: item.courseId, name: item.name, due_date: date }),
+    })
+    updateItem(stagedId, { done: true, awaitingDueDate: false })
+    setTimeout(() => setStaged(prev => prev.filter(s => s.id !== stagedId)), 1500)
+  }
+
+  function skipDueDate(stagedId: string) {
+    updateItem(stagedId, { done: true, awaitingDueDate: false })
+    setTimeout(() => setStaged(prev => prev.filter(s => s.id !== stagedId)), 1500)
+  }
+
   async function assignItem(itemId: string, courseId: string) {
     setItems(prev => prev.map(i =>
       i.inbox_item_id === itemId
@@ -238,6 +316,16 @@ export function InboxClient({ items: initialItems, courses }: { items: InboxItem
         const json = await res.json()
         if (!res.ok) {
           updateItem(item.id, { error: json.error ?? 'Upload failed' })
+        } else if (json.isHomework && json.courseId) {
+          // Homework with a known course — prompt for due date confirmation before clearing
+          updateItem(item.id, {
+            error: undefined,
+            awaitingDueDate: true,
+            detectedDueDate: json.dueDate ?? null,
+            inboxItemId: json.inbox_item_id,
+            courseId: json.courseId,
+          })
+          anySuccess = true
         } else {
           updateItem(item.id, { done: true, error: undefined })
           anySuccess = true
@@ -250,9 +338,9 @@ export function InboxClient({ items: initialItems, courses }: { items: InboxItem
     if (anySuccess) router.refresh()
     setProcessing(false)
 
-    // Clear done items after a moment
+    // Clear done items after a moment (items awaiting due date are cleared by confirmDueDate/skipDueDate)
     setTimeout(() => {
-      setStaged(prev => prev.filter(item => !item.done))
+      setStaged(prev => prev.filter(item => !item.done || item.awaitingDueDate))
     }, 1500)
   }
 
@@ -300,6 +388,8 @@ export function InboxClient({ items: initialItems, courses }: { items: InboxItem
                 item={item}
                 onRemove={() => removeItem(item.id)}
                 onChange={patch => updateItem(item.id, patch)}
+                onConfirmDueDate={date => confirmDueDate(item.id, date)}
+                onSkipDueDate={() => skipDueDate(item.id)}
               />
             ))}
           </div>

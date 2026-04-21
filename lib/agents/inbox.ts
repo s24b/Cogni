@@ -9,6 +9,8 @@ type ClassifyResult = {
   courseId: string | null
   tier: number
   status: 'classified' | 'unassigned' | 'failed'
+  isHomework: boolean
+  dueDate: string | null
 }
 
 async function extractText(buffer: Buffer, fileType: string, filename: string): Promise<string> {
@@ -45,7 +47,7 @@ export async function classifyMaterial(
   if (!apiKey) {
     await service.from('materials').update({ processing_status: 'failed' }).eq('material_id', materialId)
     await service.from('inbox_items').update({ classification_status: 'failed' }).eq('material_id', materialId)
-    return { courseId: null, tier: 4, status: 'failed' }
+    return { courseId: null, tier: 4, status: 'failed', isHomework: false, dueDate: null }
   }
 
   const { data: courses } = await service
@@ -61,7 +63,7 @@ export async function classifyMaterial(
   if (downloadError || !fileData) {
     await service.from('materials').update({ processing_status: 'failed' }).eq('material_id', materialId)
     await service.from('inbox_items').update({ classification_status: 'failed' }).eq('material_id', materialId)
-    return { courseId: null, tier: 4, status: 'failed' }
+    return { courseId: null, tier: 4, status: 'failed', isHomework: false, dueDate: null }
   }
 
   const buffer = Buffer.from(await fileData.arrayBuffer())
@@ -78,14 +80,14 @@ export async function classifyMaterial(
     if (fullContent.length > 100) {
       await processEmbeddings(userId, materialId, fullContent).catch(e => console.error('[rag] processEmbeddings failed', e))
     }
-    return { courseId: forceCourseId, tier: 4, status: 'classified' }
+    return { courseId: forceCourseId, tier: 4, status: 'classified', isHomework: false, dueDate: null }
   }
 
   const client = new Anthropic({ apiKey })
 
   const message = await client.messages.create({
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 256,
+    max_tokens: 512,
     messages: [
       {
         role: 'user',
@@ -102,8 +104,10 @@ Classify this document:
 1. is_context_hint: true if this is a meta-note or instruction (e.g. "these are my syllabi", "use this to help classify", references other files) rather than actual course material — false otherwise
 2. course_id: which course_id from the list above, or null if none match (ignored if is_context_hint is true)
 3. tier: 1=syllabus/course overview, 2=primary material (lecture notes, textbook), 3=supplementary (practice problems, past exams), 4=misc/unclear (ignored if is_context_hint is true)
+4. is_homework: true if this is a homework assignment, problem set, or assignment sheet that a student needs to submit (NOT lecture notes, past exams, or syllabuses) — false otherwise
+5. due_date: if is_homework is true, extract the due date as "YYYY-MM-DD" string (e.g. "2025-11-15"), or null if no due date is mentioned
 
-Respond with exactly: {"is_context_hint":<true|false>,"course_id":"<uuid or null>","tier":<1-4>}`,
+Respond with exactly: {"is_context_hint":<true|false>,"course_id":"<uuid or null>","tier":<1-4>,"is_homework":<true|false>,"due_date":"<YYYY-MM-DD or null>"}`,
       },
     ],
   })
@@ -111,6 +115,8 @@ Respond with exactly: {"is_context_hint":<true|false>,"course_id":"<uuid or null
   let courseId: string | null = null
   let tier = 4
   let isContextHint = false
+  let isHomework = false
+  let dueDate: string | null = null
 
   const raw = message.content[0].type === 'text' ? message.content[0].text : ''
   const cleaned = raw
@@ -126,6 +132,10 @@ Respond with exactly: {"is_context_hint":<true|false>,"course_id":"<uuid or null
     isContextHint = parsed.is_context_hint === true
     courseId = parsed.course_id ?? null
     tier = typeof parsed.tier === 'number' ? Math.max(1, Math.min(4, parsed.tier)) : 4
+    isHomework = parsed.is_homework === true
+    dueDate = typeof parsed.due_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.due_date)
+      ? parsed.due_date
+      : null
   } catch (e) {
     console.error('[inbox] JSON parse failed. Raw response was:\n---\n' + raw.slice(0, 500) + '\n---', e)
   }
@@ -135,7 +145,7 @@ Respond with exactly: {"is_context_hint":<true|false>,"course_id":"<uuid or null
     await service.from('inbox_items').delete().eq('material_id', materialId)
     await service.from('materials').delete().eq('material_id', materialId)
     await appendToLog(userId, `Inbox: "${filename}" auto-dismissed as context hint`)
-    return { courseId: null, tier: 4, status: 'classified' }
+    return { courseId: null, tier: 4, status: 'classified', isHomework: false, dueDate: null }
   }
 
   const classificationStatus = courseId ? 'classified' : 'unassigned'
@@ -168,5 +178,5 @@ Respond with exactly: {"is_context_hint":<true|false>,"course_id":"<uuid or null
     await runProfiler(userId, materialId, courseId, courseName2)
   }
 
-  return { courseId, tier, status: classificationStatus }
+  return { courseId, tier, status: classificationStatus, isHomework, dueDate }
 }
