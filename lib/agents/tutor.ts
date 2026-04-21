@@ -213,15 +213,27 @@ export async function getSessionMessages(sessionId: string) {
   const service = createServiceClient()
   const { data } = await service
     .from('session_messages')
-    .select('role, content')
+    .select('role, content, inline_card')
     .eq('session_id', sessionId)
     .order('created_at', { ascending: true })
   return data ?? []
 }
 
-export async function saveMessage(sessionId: string, userId: string, role: 'user' | 'assistant', content: string) {
+export async function saveMessage(
+  sessionId: string,
+  userId: string,
+  role: 'user' | 'assistant',
+  content: string,
+  inlineCard?: object | null,
+) {
   const service = createServiceClient()
-  await service.from('session_messages').insert({ session_id: sessionId, user_id: userId, role, content })
+  await service.from('session_messages').insert({
+    session_id: sessionId,
+    user_id: userId,
+    role,
+    content,
+    ...(inlineCard ? { inline_card: inlineCard } : {}),
+  })
 }
 
 export async function autoNameSession(sessionId: string, userId: string, firstExchange: string, apiKey: string) {

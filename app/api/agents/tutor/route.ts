@@ -259,6 +259,7 @@ export async function POST(request: Request) {
         ]
 
         let fullText = ''
+        let serverInlineCard: object | null = null
         let iterations = 0
 
         while (iterations < 5) {
@@ -342,6 +343,7 @@ export async function POST(request: Request) {
               if (block.name === 'open_essay_mode') {
                 const input = block.input as { topic: string }
                 controller.enqueue(emit({ t: 'essay_open', topic: input.topic }))
+                serverInlineCard = { type: 'essay', topic: input.topic, count: 0 }
                 toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: 'Essay mode opened. Tell the student the writing space is ready.' })
               } else if (block.name === 'suggest_edit') {
                 const input = block.input as { target: string; replacement: string; instruction: string }
@@ -377,12 +379,14 @@ export async function POST(request: Request) {
                 } catch { /* non-critical */ }
 
                 controller.enqueue(emit({ t: 'card', kind: 'flashcards', topic: input.topic, count: savedData.length, data: savedData }))
+                serverInlineCard = { type: 'flashcards', topic: input.topic, count: savedData.length, data: savedData }
 
                 const cardList = input.cards.map((c, i) => `${i + 1}. Front: ${c.front} | Back: ${c.back}`).join('\n')
                 toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: `Created ${input.cards.length} flashcards on "${input.topic}" and saved them to the student's deck. Tell the student they're ready and have been added to spaced repetition.\n\nCards you created:\n${cardList}` })
               } else if (block.name === 'create_quiz') {
                 const input = block.input as { topic: string; questions: object[] }
                 controller.enqueue(emit({ t: 'card', kind: 'quiz', topic: input.topic, count: input.questions.length, data: input.questions }))
+                serverInlineCard = { type: 'quiz', topic: input.topic, count: input.questions.length, data: input.questions }
                 const questionList = (input.questions as Array<{ question: string; answer: string; explanation: string }>)
                   .map((q, i) => `${i + 1}. ${q.question}\n   Answer: ${q.answer}\n   Explanation: ${q.explanation}`)
                   .join('\n\n')
@@ -442,7 +446,7 @@ export async function POST(request: Request) {
         }
 
         controller.close()
-        await saveMessage(sessionId, user.id, 'assistant', fullText)
+        await saveMessage(sessionId, user.id, 'assistant', fullText, serverInlineCard)
 
         const isFirstExchange = priorMessages.length === 0
         if (isFirstExchange) {

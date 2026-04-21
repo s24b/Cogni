@@ -642,11 +642,23 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
       const res = await fetch(`/api/agents/tutor?sessionId=${session.session_id}`)
       if (res.ok) {
         const { messages: stored } = await res.json() as {
-          messages: { role: string; content: string }[]
+          messages: { role: string; content: string; inline_card?: InlineCard | null }[]
         }
-        setMessages(
-          stored.map(m => ({ role: m.role as Message['role'], content: m.content }))
-        )
+        const restored = stored.map(m => {
+          const base: Message = { role: m.role as Message['role'], content: m.content }
+          if (m.inline_card) {
+            base.inlineCard = m.inline_card
+            // Re-open essay mode if the last essay card is restored
+            if (m.inline_card.type === 'essay' && m === stored[stored.length - 1]) {
+              setEssay({ open: true, topic: m.inline_card.topic })
+            }
+          }
+          return base
+        })
+        setMessages(restored)
+        // Restore the last artifact in the split panel if present
+        const lastCard = restored.slice().reverse().find(m => m.inlineCard)?.inlineCard
+        if (lastCard && lastCard.type !== 'essay') setSplitContent(lastCard)
       }
     } catch {
       // non-critical — leave messages empty
