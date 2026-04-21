@@ -20,6 +20,8 @@ import {
   CaretUp,
   User,
   X,
+  Trash,
+  ArrowRight,
   UploadSimple,
   Check,
   Waveform,
@@ -202,18 +204,55 @@ function TestResultRow({ result }: { result: TestResult }) {
   )
 }
 
-function MaterialRow({ material }: { material: Material }) {
+function MaterialRow({ material, onDeleted }: { material: Material; onDeleted: () => void }) {
+  const [confirming, setConfirming] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const date = new Date(material.uploaded_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
   const tierLabel = material.tier ? (TIER_LABELS[material.tier] ?? `Tier ${material.tier}`) : 'Uncategorized'
 
+  async function handleDelete() {
+    setDeleting(true)
+    await fetch(`/api/materials/${material.material_id}`, { method: 'DELETE' })
+    onDeleted()
+  }
+
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
-      <FileIcon fileType={material.file_type} />
-      <div className="flex flex-1 flex-col gap-0.5 min-w-0">
-        <span className="text-sm text-foreground truncate">{material.filename ?? 'Untitled'}</span>
-        <span className="text-xs text-muted-foreground">{tierLabel} · {date}</span>
+    <div className="flex flex-col gap-2 rounded-xl border border-border bg-card px-4 py-3">
+      <div className="flex items-center gap-3">
+        <FileIcon fileType={material.file_type} />
+        <div className="flex flex-1 flex-col gap-0.5 min-w-0">
+          <span className="text-sm text-foreground truncate">{material.filename ?? 'Untitled'}</span>
+          <span className="text-xs text-muted-foreground">{tierLabel} · {date}</span>
+        </div>
+        <StatusChip status={material.processing_status} />
+        <button
+          onClick={() => setConfirming(v => !v)}
+          aria-label="Delete material"
+          className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors shrink-0"
+        >
+          <Trash size={13} />
+        </button>
       </div>
-      <StatusChip status={material.processing_status} />
+      {confirming && (
+        <div className="flex items-center justify-between rounded-lg bg-destructive/5 border border-destructive/20 px-3 py-2">
+          <span className="text-xs text-destructive">Remove this file? Topics and cards already generated are kept.</span>
+          <div className="flex items-center gap-2 ml-3 shrink-0">
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="rounded-md bg-destructive px-2.5 py-1 text-[11px] font-semibold text-destructive-foreground hover:bg-destructive/90 disabled:opacity-40 transition-colors"
+            >
+              {deleting ? 'Deleting…' : 'Delete'}
+            </button>
+            <button
+              onClick={() => setConfirming(false)}
+              className="rounded-md border border-border px-2.5 py-1 text-[11px] text-muted-foreground hover:bg-muted/50 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -572,6 +611,47 @@ function ArchiveModal({
   )
 }
 
+const MATERIALS_PREVIEW_COUNT = 5
+
+function MaterialsSection({
+  materials,
+  courseId,
+  onDeleted,
+}: {
+  materials: Material[]
+  courseId: string
+  onDeleted: () => void
+}) {
+  const router = useRouter()
+  const preview = materials.slice(0, MATERIALS_PREVIEW_COUNT)
+  const hasMore = materials.length > MATERIALS_PREVIEW_COUNT
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-foreground">Materials</h2>
+        <span className="text-xs text-muted-foreground">{materials.length}</span>
+      </div>
+      <StaggerList className="flex flex-col gap-2">
+        {preview.map(m => (
+          <StaggerItem key={m.material_id}>
+            <MaterialRow material={m} onDeleted={onDeleted} />
+          </StaggerItem>
+        ))}
+      </StaggerList>
+      {hasMore && (
+        <button
+          onClick={() => router.push(`/courses/${courseId}/materials`)}
+          className="flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-border py-2.5 text-xs text-muted-foreground hover:border-primary/50 hover:text-foreground transition-colors"
+        >
+          View all {materials.length} materials
+          <ArrowRight size={12} />
+        </button>
+      )}
+    </div>
+  )
+}
+
 type Mode = 'overview' | 'quiz' | 'exam'
 
 export function CourseDetailClient({
@@ -738,19 +818,11 @@ export function CourseDetailClient({
 
             {/* Materials */}
             {materials.length > 0 && (
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-sm font-semibold text-foreground">Materials</h2>
-                  <span className="text-xs text-muted-foreground">{materials.length}</span>
-                </div>
-                <StaggerList className="flex flex-col gap-2">
-                  {materials.map(m => (
-                    <StaggerItem key={m.material_id}>
-                      <MaterialRow material={m} />
-                    </StaggerItem>
-                  ))}
-                </StaggerList>
-              </div>
+              <MaterialsSection
+                materials={materials}
+                courseId={course.course_id}
+                onDeleted={() => router.refresh()}
+              />
             )}
 
             {/* Test history */}

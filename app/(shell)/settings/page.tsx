@@ -11,6 +11,7 @@ import { ApiKeyField } from './_key-field'
 import { SessionLengthPicker } from './_session-length'
 import { AppearancePicker } from './_appearance'
 import { AccountSection } from './_account'
+import { KnowledgeStore } from './_knowledge-store'
 import { CheckCircle, XCircle } from '@phosphor-icons/react/dist/ssr'
 
 export const dynamic = 'force-dynamic'
@@ -23,12 +24,14 @@ export default async function SettingsPage() {
   const service = createServiceClient()
   const isDev = process.env.NODE_ENV === 'development'
 
-  const [calRow, userData, anthropicKey, openaiKey, materialsData] = await Promise.all([
+  const [calRow, userData, anthropicKey, openaiKey, materialsData, wikiFiles, professorsData] = await Promise.all([
     service.from('calendar_connections').select('cogni_calendar_id').eq('user_id', user.id).eq('provider', 'google').single(),
     service.from('users').select('session_length_preference, display_name').eq('user_id', user.id).single(),
     getUserApiKey(user.id),
     getUserKey(user.id, 'openai_key'),
     service.from('materials').select('course_id, tier, uploaded_at').eq('user_id', user.id).eq('processing_status', 'processed'),
+    service.storage.from('wiki').list(user.id, { limit: 100 }),
+    service.from('professors').select('professor_id, name').eq('user_id', user.id),
   ])
 
   const connected = !!calRow.data
@@ -46,6 +49,24 @@ export default async function SettingsPage() {
     .order('name')
 
   const materials = materialsData.data ?? []
+
+  // Build wiki files list with content
+  const HIDDEN = new Set(['index.md'])
+  type StorageFile = { name: string; updated_at?: string }
+  const visibleWikiFiles = (wikiFiles.data ?? []).filter((f: StorageFile) => !HIDDEN.has(f.name))
+  const wikiFilesWithContent = await Promise.all(
+    visibleWikiFiles.map(async (f: StorageFile) => {
+      const { data } = await service.storage.from('wiki').download(`${user.id}/${f.name}`)
+      const content = data ? await data.text() : ''
+      return { filename: f.name, content, updated_at: f.updated_at ?? null }
+    })
+  )
+
+  // Professor ID → name map
+  const professorMap: Record<string, string> = {}
+  for (const p of professorsData.data ?? []) {
+    professorMap[p.professor_id] = p.name
+  }
 
   return (
     <div className="flex flex-1 flex-col overflow-y-auto">
@@ -143,6 +164,9 @@ export default async function SettingsPage() {
             </>
           )}
         </section>
+
+        {/* Knowledge Store */}
+        <KnowledgeStore files={wikiFilesWithContent} professorMap={professorMap} />
 
         {/* Account */}
         <section className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5">

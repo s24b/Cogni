@@ -1,0 +1,80 @@
+import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { NextResponse } from 'next/server'
+
+const BUCKET = 'wiki'
+const HIDDEN = new Set(['index.md'])
+
+// GET — list all wiki files with content
+export async function GET() {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const service = createServiceClient()
+  const { data: files, error } = await service.storage.from(BUCKET).list(user.id, { limit: 100 })
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  type StorageFile = { name: string; updated_at?: string; created_at?: string }
+  const visible = (files ?? []).filter((f: StorageFile) => !HIDDEN.has(f.name))
+
+  const results = await Promise.all(
+    visible.map(async (f: StorageFile) => {
+      const { data } = await service.storage.from(BUCKET).download(`${user.id}/${f.name}`)
+      const content = data ? await data.text() : ''
+      return { filename: f.name, content, updated_at: f.updated_at ?? f.created_at ?? null }
+    })
+  )
+
+  return NextResponse.json({ files: results })
+}
+
+// PATCH — update a wiki file's content
+export async function PATCH(request: Request) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const { filename, content } = await request.json()
+  if (!filename || typeof content !== 'string') {
+    return NextResponse.json({ error: 'filename and content required' }, { status: 400 })
+  }
+  if (HIDDEN.has(filename)) {
+    return NextResponse.json({ error: 'Cannot edit this file' }, { status: 403 })
+  }
+
+  const service = createServiceClient()
+  const { error } = await service.storage
+    .from(BUCKET)
+    .upload(`${user.id}/${filename}`, new Blob([content], { type: 'text/markdown' }), { upsert: true })
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  // Version record
+  await service.from('wiki_versions').insert({
+    user_id: user.id,
+    file_path: filename,
+    content,
+    triggered_by_agent: 'user_edit',
+  })
+
+  return NextResponse.json({ ok: true })
+}
+
+// DELETE — remove a wiki file
+export async function DELETE(request: Request) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const { filename } = await request.json()
+  if (!filename) return NextResponse.json({ error: 'filename required' }, { status: 400 })
+  if (HIDDEN.has(filename)) {
+    return NextResponse.json({ error: 'Cannot delete this file' }, { status: 403 })
+  }
+
+  const service = createServiceClient()
+  const { error } = await service.storage.from(BUCKET).remove([`${user.id}/${filename}`])
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  return NextResponse.json({ ok: true })
+}
