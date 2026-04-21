@@ -889,6 +889,18 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
     }
   }
 
+  function handleFlashcardComplete(summary: { total: number; again: number; hard: number; good: number; easy: number }) {
+    const topic = splitContent?.topic ?? 'the flashcards'
+    const parts: string[] = []
+    if (summary.again > 0) parts.push(`Again ×${summary.again}`)
+    if (summary.hard > 0) parts.push(`Hard ×${summary.hard}`)
+    if (summary.good > 0) parts.push(`Good ×${summary.good}`)
+    if (summary.easy > 0) parts.push(`Easy ×${summary.easy}`)
+    const ratingStr = parts.length > 0 ? ` My ratings: ${parts.join(', ')}.` : ''
+    const text = `I just finished reviewing ${summary.total} flashcards on ${topic}.${ratingStr} Can you give me a quick summary of how I did and what to focus on next?`
+    sendMessage(text)
+  }
+
   function handleQuizComplete(summary: GradeSummary) {
     const topic = splitContent?.topic ?? 'the quiz'
     const total = splitContent?.count ?? summary.correctCount
@@ -1509,6 +1521,7 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
                 cards={splitContent.data as { front: string; back: string; card_id?: string }[]}
                 topic={splitContent.topic}
                 onClose={() => setSplitExpanded(false)}
+                onComplete={handleFlashcardComplete}
               />
             ) : (
               <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">

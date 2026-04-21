@@ -362,7 +362,7 @@ export async function POST(request: Request) {
                     .eq('course_id', courseId)
                     .ilike('name', `%${input.topic}%`)
                     .limit(1)
-                    .single()
+                    .maybeSingle()
                   const defaults = newCardDefaults()
                   const { data: inserted } = await saveSvc.from('flashcards').insert(
                     input.cards.map(card => ({

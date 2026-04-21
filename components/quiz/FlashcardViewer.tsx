@@ -10,15 +10,25 @@ import {
   ArrowRight,
   Cards,
   X,
+  CheckCircle,
 } from '@phosphor-icons/react'
 import { ease } from '@/components/ui/motion'
 
 type Flashcard = { front: string; back: string; card_id?: string }
 
+type RatingSummary = {
+  total: number
+  again: number
+  hard: number
+  good: number
+  easy: number
+}
+
 type Props = {
   cards: Flashcard[]
   topic: string
   onClose: () => void
+  onComplete?: (summary: RatingSummary) => void
 }
 
 const RATINGS = [
@@ -39,12 +49,13 @@ function MathText({ text }: { text: string }) {
   )
 }
 
-export function FlashcardViewer({ cards, topic, onClose }: Props) {
+export function FlashcardViewer({ cards, topic, onClose, onComplete }: Props) {
   const [index, setIndex] = useState(0)
   const [flipped, setFlipped] = useState(false)
   const [direction, setDirection] = useState<1 | -1>(1)
   const [ratedMap, setRatedMap] = useState<Record<number, number>>({})
   const [submitting, setSubmitting] = useState(false)
+  const [done, setDone] = useState(false)
 
   // Reset when tutor regenerates the deck (new cards array from parent).
   const lastCardsRef = useRef(cards)
@@ -90,12 +101,23 @@ export function FlashcardViewer({ cards, topic, onClose }: Props) {
       } catch { /* non-critical */ }
       setSubmitting(false)
     }
-    // Auto-advance after rating
+    // Auto-advance after rating, or show done screen on last card
     setTimeout(() => {
       if (index < cards.length - 1) {
         setDirection(1)
         setFlipped(false)
         setIndex(i => i + 1)
+      } else {
+        const finalMap = { ...ratedMap, [index]: rating }
+        const counts = { again: 0, hard: 0, good: 0, easy: 0 }
+        Object.values(finalMap).forEach(r => {
+          if (r === 1) counts.again++
+          else if (r === 2) counts.hard++
+          else if (r === 3) counts.good++
+          else if (r === 4) counts.easy++
+        })
+        setDone(true)
+        onComplete?.({ total: cards.length, ...counts })
       }
     }, 300)
   }
@@ -108,6 +130,48 @@ export function FlashcardViewer({ cards, topic, onClose }: Props) {
 
   function dotTargetIndex(i: number) {
     return maxDots === cards.length ? i : Math.round((i / (maxDots - 1)) * (cards.length - 1))
+  }
+
+  if (done) {
+    const goodOrEasy = Object.values(ratedMap).filter(r => r >= 3).length
+    return (
+      <div className="flex h-full flex-col overflow-hidden">
+        <div className="flex items-center gap-3 border-b border-border px-4 py-3 shrink-0">
+          <div className="flex size-7 items-center justify-center rounded-lg bg-primary/10">
+            <Cards size={14} className="text-primary" weight="fill" />
+          </div>
+          <span className="flex-1 text-sm font-semibold text-foreground truncate">Flashcards — {topic}</span>
+          <button onClick={onClose} aria-label="Close flashcards" className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors">
+            <X size={14} />
+          </button>
+        </div>
+        <div className="flex flex-1 flex-col items-center justify-center gap-5 p-6 text-center">
+          <div className="flex size-14 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-950">
+            <CheckCircle size={28} className="text-emerald-600 dark:text-emerald-400" weight="fill" />
+          </div>
+          <div>
+            <p className="text-base font-semibold text-foreground">All done!</p>
+            <p className="mt-1 text-sm text-muted-foreground">{cards.length} cards reviewed · {goodOrEasy} marked Good or Easy</p>
+          </div>
+          <div className="flex gap-2 text-xs">
+            {[
+              { label: 'Again', count: Object.values(ratedMap).filter(r => r === 1).length, color: 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400' },
+              { label: 'Hard',  count: Object.values(ratedMap).filter(r => r === 2).length, color: 'bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-400' },
+              { label: 'Good',  count: Object.values(ratedMap).filter(r => r === 3).length, color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400' },
+              { label: 'Easy',  count: Object.values(ratedMap).filter(r => r === 4).length, color: 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-400' },
+            ].filter(b => b.count > 0).map(b => (
+              <span key={b.label} className={`rounded-lg px-2.5 py-1 font-medium ${b.color}`}>{b.label} ×{b.count}</span>
+            ))}
+          </div>
+          <button
+            onClick={onClose}
+            className="mt-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    )
   }
 
   return (
