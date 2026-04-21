@@ -44,19 +44,25 @@ export async function POST(request: Request) {
   }
 
   // Reject duplicates by filename (files only, not text entries)
+  // Exception: if the existing record is stuck pending (classification failed), allow re-upload
   if (file) {
     const { data: existing } = await service
       .from('materials')
-      .select('material_id')
+      .select('material_id, processing_status')
       .eq('user_id', user.id)
       .eq('filename', filename)
       .limit(1)
 
     if (existing && existing.length > 0) {
-      return NextResponse.json(
-        { error: `"${filename}" has already been uploaded.` },
-        { status: 409 }
-      )
+      const stuck = existing[0].processing_status === 'pending' || existing[0].processing_status === 'failed'
+      if (!stuck) {
+        return NextResponse.json(
+          { error: `"${filename}" has already been uploaded.` },
+          { status: 409 }
+        )
+      }
+      // Stuck record — delete it so this upload can proceed cleanly
+      await service.from('materials').delete().eq('material_id', existing[0].material_id)
     }
   }
 
@@ -101,15 +107,25 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: inboxError?.message ?? 'DB error' }, { status: 500 })
   }
 
-  const result = await classifyMaterial(
-    user.id,
-    material.material_id,
-    storagePath,
-    filename,
-    ext,
-    context,
-    courseIdHint,
-  )
+  let result
+  try {
+    result = await classifyMaterial(
+      user.id,
+      material.material_id,
+      storagePath,
+      filename,
+      ext,
+      context,
+      courseIdHint,
+    )
+  } catch (e) {
+    // Mark material as failed so the duplicate check allows retry next time
+    await service.from('materials').update({ processing_status: 'failed' }).eq('material_id', material.material_id)
+    return NextResponse.json(
+      { error: `File was saved but classification failed: ${e instanceof Error ? e.message : 'unknown error'}. Try uploading again.` },
+      { status: 500 }
+    )
+  }
 
   // Fire-and-forget: rerun scheduler so today's plan reflects the new material
   runScheduler(user.id).catch(() => {})
