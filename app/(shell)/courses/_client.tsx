@@ -25,6 +25,7 @@ type CourseCard = {
   avg_coverage: number
   avg_mastery: number
   material_count: number
+  has_primary_material: boolean
 }
 
 function CoverageBar({ coverage, mastery }: { coverage: number; mastery: number }) {
@@ -57,7 +58,7 @@ function CoverageBar({ coverage, mastery }: { coverage: number; mastery: number 
 function CourseGridCard({ course }: { course: CourseCard }) {
   const router = useRouter()
   const noContent = course.topic_count === 0
-  const noMaterial = course.topic_count > 0 && course.avg_coverage === 0
+  const noMaterial = course.topic_count > 0 && !course.has_primary_material
 
   return (
     <button

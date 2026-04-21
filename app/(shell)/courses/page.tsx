@@ -23,7 +23,7 @@ export default async function CoursesPage() {
           topic_mastery ( mastery_score ),
           flashcards ( card_id )
         ),
-        materials ( material_id )
+        materials ( material_id, tier )
       `)
       .eq('user_id', user.id)
       .eq('active_status', 'active')
@@ -81,6 +81,7 @@ export default async function CoursesPage() {
       avg_coverage: avgCoverage,
       avg_mastery: avgMastery,
       material_count: Array.isArray(c.materials) ? c.materials.length : 0,
+      has_primary_material: Array.isArray(c.materials) && c.materials.some((m: { tier: number }) => m.tier >= 2),
     }
   }
 
