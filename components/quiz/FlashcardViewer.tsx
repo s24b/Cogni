@@ -9,18 +9,24 @@ import {
   ArrowLeft,
   ArrowRight,
   Cards,
-  ArrowCounterClockwise,
   X,
 } from '@phosphor-icons/react'
 import { ease } from '@/components/ui/motion'
 
-type Flashcard = { front: string; back: string }
+type Flashcard = { front: string; back: string; card_id?: string }
 
 type Props = {
   cards: Flashcard[]
   topic: string
   onClose: () => void
 }
+
+const RATINGS = [
+  { label: 'Again', value: 1 as const, color: 'bg-red-500 hover:bg-red-600 text-white' },
+  { label: 'Hard',  value: 2 as const, color: 'bg-orange-400 hover:bg-orange-500 text-white' },
+  { label: 'Good',  value: 3 as const, color: 'bg-emerald-500 hover:bg-emerald-600 text-white' },
+  { label: 'Easy',  value: 4 as const, color: 'bg-blue-500 hover:bg-blue-600 text-white' },
+]
 
 function MathText({ text }: { text: string }) {
   return (
@@ -37,6 +43,8 @@ export function FlashcardViewer({ cards, topic, onClose }: Props) {
   const [index, setIndex] = useState(0)
   const [flipped, setFlipped] = useState(false)
   const [direction, setDirection] = useState<1 | -1>(1)
+  const [ratedMap, setRatedMap] = useState<Record<number, number>>({})
+  const [submitting, setSubmitting] = useState(false)
 
   // Reset when tutor regenerates the deck (new cards array from parent).
   const lastCardsRef = useRef(cards)
@@ -46,6 +54,7 @@ export function FlashcardViewer({ cards, topic, onClose }: Props) {
       setIndex(0)
       setFlipped(false)
       setDirection(1)
+      setRatedMap({})
     }
   }, [cards])
 
@@ -67,8 +76,38 @@ export function FlashcardViewer({ cards, topic, onClose }: Props) {
     }
   }
 
-  function handleFlip() {
-    setFlipped(f => !f)
+  async function handleRate(rating: 1 | 2 | 3 | 4) {
+    if (submitting) return
+    setRatedMap(prev => ({ ...prev, [index]: rating }))
+    if (card.card_id) {
+      setSubmitting(true)
+      try {
+        await fetch('/api/cards/review', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cardId: card.card_id, rating }),
+        })
+      } catch { /* non-critical */ }
+      setSubmitting(false)
+    }
+    // Auto-advance after rating
+    setTimeout(() => {
+      if (index < cards.length - 1) {
+        setDirection(1)
+        setFlipped(false)
+        setIndex(i => i + 1)
+      }
+    }, 300)
+  }
+
+  // Dot indicator — always show active dot for current index
+  const maxDots = Math.min(cards.length, 7)
+  const activeDot = cards.length <= maxDots
+    ? index
+    : Math.round((index / (cards.length - 1)) * (maxDots - 1))
+
+  function dotTargetIndex(i: number) {
+    return maxDots === cards.length ? i : Math.round((i / (maxDots - 1)) * (cards.length - 1))
   }
 
   return (
@@ -98,17 +137,17 @@ export function FlashcardViewer({ cards, topic, onClose }: Props) {
       </div>
 
       {/* Card area */}
-      <div className="flex flex-1 flex-col items-center justify-center gap-4 p-5 overflow-hidden">
+      <div className="flex flex-1 flex-col items-center justify-center gap-5 p-5 overflow-hidden">
         <AnimatePresence mode="wait">
           <motion.button
             key={`${index}-${flipped ? 'back' : 'front'}`}
-            onClick={handleFlip}
+            onClick={() => setFlipped(f => !f)}
             initial={{ opacity: 0, x: direction * 30 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: direction * -30 }}
             transition={{ duration: 0.2, ease }}
-            className="group relative flex w-full max-w-sm cursor-pointer select-none flex-col items-center justify-center rounded-2xl border border-border bg-card p-6 shadow-sm hover:border-primary/30 hover:shadow-md transition-all"
-            style={{ minHeight: 200 }}
+            className="group relative flex w-full cursor-pointer select-none flex-col items-center justify-center rounded-2xl border border-border bg-card p-8 shadow-sm hover:border-primary/30 hover:shadow-md transition-all"
+            style={{ minHeight: 260 }}
           >
             <div className="absolute top-3 right-3">
               <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${flipped ? 'bg-emerald-500/10 text-emerald-600' : 'bg-primary/10 text-primary'}`}>
@@ -116,15 +155,44 @@ export function FlashcardViewer({ cards, topic, onClose }: Props) {
               </span>
             </div>
 
-            <div className={`text-center text-sm font-medium leading-relaxed ${flipped ? 'text-emerald-700 dark:text-emerald-400' : 'text-foreground'}`}>
+            <div className={`text-center text-base font-medium leading-relaxed ${flipped ? 'text-emerald-700 dark:text-emerald-400' : 'text-foreground'}`}>
               <MathText text={flipped ? card.back : card.front} />
             </div>
 
-            <div className="absolute bottom-3 flex items-center gap-1 text-[10px] text-muted-foreground/60 group-hover:text-muted-foreground/80 transition-colors">
-              <ArrowCounterClockwise size={10} />
-              tap to {flipped ? 'see front' : 'reveal answer'}
-            </div>
+            {!flipped && (
+              <p className="absolute bottom-3 text-[10px] text-muted-foreground/60 group-hover:text-muted-foreground/80 transition-colors">
+                tap to reveal answer
+              </p>
+            )}
           </motion.button>
+        </AnimatePresence>
+
+        {/* Difficulty rating — only shown after flip */}
+        <AnimatePresence>
+          {flipped && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 10 }}
+              transition={{ duration: 0.15 }}
+              className="flex w-full gap-2"
+            >
+              {RATINGS.map(r => (
+                <button
+                  key={r.value}
+                  onClick={() => handleRate(r.value)}
+                  disabled={submitting}
+                  className={`flex flex-1 items-center justify-center rounded-xl py-2.5 text-sm font-semibold transition-all disabled:opacity-50 ${
+                    ratedMap[index] === r.value
+                      ? r.color + ' ring-2 ring-offset-1 ring-current'
+                      : r.color
+                  }`}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </motion.div>
+          )}
         </AnimatePresence>
 
         {/* Nav */}
@@ -137,21 +205,15 @@ export function FlashcardViewer({ cards, topic, onClose }: Props) {
             <ArrowLeft size={16} />
           </button>
 
-          {/* Dot indicators (show up to 7) */}
-          <div className="flex items-center gap-1">
-            {cards.slice(0, 7).map((_, i) => {
-              const actual = cards.length > 7
-                ? Math.round((i / 6) * (cards.length - 1))
-                : i
-              const active = actual === index
-              return (
-                <button
-                  key={i}
-                  onClick={() => { setFlipped(false); setIndex(actual) }}
-                  className={`rounded-full transition-all ${active ? 'w-3 h-3 bg-primary' : 'w-2 h-2 bg-muted hover:bg-muted-foreground/40'}`}
-                />
-              )
-            })}
+          {/* Dot indicators */}
+          <div className="flex items-center gap-1.5">
+            {Array.from({ length: maxDots }, (_, i) => (
+              <button
+                key={i}
+                onClick={() => { setFlipped(false); setIndex(dotTargetIndex(i)) }}
+                className={`rounded-full transition-all duration-200 ${activeDot === i ? 'w-3 h-3 bg-primary' : 'w-2 h-2 bg-muted hover:bg-muted-foreground/40'}`}
+              />
+            ))}
           </div>
 
           <button

@@ -1494,7 +1494,7 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
               />
             ) : splitContent.type === 'flashcards' && splitContent.data ? (
               <FlashcardViewer
-                cards={splitContent.data as { front: string; back: string }[]}
+                cards={splitContent.data as { front: string; back: string; card_id?: string }[]}
                 topic={splitContent.topic}
                 onClose={() => setSplitExpanded(false)}
               />

@@ -153,15 +153,25 @@ function TopicRow({ topic, courseId, onRefresh }: { topic: Topic; courseId: stri
       <div className="flex items-center gap-2">
         <span className="flex-1 text-sm font-medium text-foreground">{topic.name}</span>
         {topic.card_count > 0 ? (
-          <span className="flex items-center gap-1 text-xs text-muted-foreground">
-            <Cards size={11} />
-            {topic.card_count}
-            {topic.due_count > 0 && (
-              <span className="ml-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
-                {topic.due_count} due
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Cards size={11} />
+              {topic.card_count}
+            </span>
+            {topic.due_count > 0 ? (
+              <a
+                href={`/review?topic=${topic.topic_id}`}
+                className="flex items-center gap-1 rounded-lg bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/20 transition-colors"
+              >
+                <Lightning size={10} weight="fill" />
+                {topic.due_count} due — Review
+              </a>
+            ) : (
+              <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                All caught up
               </span>
             )}
-          </span>
+          </div>
         ) : (
           <button
             onClick={handleGenerate}

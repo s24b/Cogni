@@ -349,9 +349,9 @@ export async function POST(request: Request) {
                 toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: 'Edit suggested and shown to student as a tracked change.' })
               } else if (block.name === 'create_flashcards') {
                 const input = block.input as { topic: string; cards: { front: string; back: string }[] }
-                controller.enqueue(emit({ t: 'card', kind: 'flashcards', topic: input.topic, count: input.cards.length, data: input.cards }))
 
-                // Save cards to flashcards table so they enter spaced repetition
+                // Save cards to flashcards table so they enter spaced repetition, then emit with card_ids
+                let savedData: { card_id: string; front: string; back: string }[] = input.cards.map(c => ({ card_id: '', front: c.front, back: c.back }))
                 try {
                   const saveSvc = createServiceClient()
                   const { data: topicRow } = await saveSvc
@@ -362,7 +362,7 @@ export async function POST(request: Request) {
                     .limit(1)
                     .single()
                   const defaults = newCardDefaults()
-                  await saveSvc.from('flashcards').insert(
+                  const { data: inserted } = await saveSvc.from('flashcards').insert(
                     input.cards.map(card => ({
                       user_id: user.id,
                       course_id: courseId,
@@ -372,8 +372,11 @@ export async function POST(request: Request) {
                       hint: null,
                       ...defaults,
                     }))
-                  )
+                  ).select('card_id, front, back')
+                  if (inserted) savedData = inserted
                 } catch { /* non-critical */ }
+
+                controller.enqueue(emit({ t: 'card', kind: 'flashcards', topic: input.topic, count: savedData.length, data: savedData }))
 
                 const cardList = input.cards.map((c, i) => `${i + 1}. Front: ${c.front} | Back: ${c.back}`).join('\n')
                 toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: `Created ${input.cards.length} flashcards on "${input.topic}" and saved them to the student's deck. Tell the student they're ready and have been added to spaced repetition.\n\nCards you created:\n${cardList}` })
