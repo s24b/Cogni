@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { getUserApiKey } from '@/lib/vault'
 import { appendToLog } from '@/lib/wiki'
 import { runProfiler } from '@/lib/agents/profiler'
+import { runFlashcardAgent } from '@/lib/agents/flashcard'
 import { processEmbeddings } from '@/lib/rag'
 
 type ClassifyResult = {
@@ -178,5 +179,38 @@ Respond with exactly: {"is_context_hint":<true|false>,"course_id":"<uuid or null
     await runProfiler(userId, materialId, courseId, courseName2)
   }
 
+  // Auto-generate flashcards for tier 1 or 2 materials — find topics with no cards yet
+  if ((tier === 1 || tier === 2) && courseId && classificationStatus === 'classified') {
+    autoGenerateFlashcards(userId, courseId).catch(() => {})
+  }
+
   return { courseId, tier, status: classificationStatus, isHomework, dueDate }
+}
+
+async function autoGenerateFlashcards(userId: string, courseId: string) {
+  const service = createServiceClient()
+
+  const { data: topics } = await service
+    .from('topics')
+    .select('topic_id, name')
+    .eq('course_id', courseId)
+    .eq('user_id', userId)
+
+  if (!topics || topics.length === 0) return
+
+  const topicIds = topics.map((t: { topic_id: string }) => t.topic_id)
+
+  const { data: existingCards } = await service
+    .from('flashcards')
+    .select('topic_id')
+    .eq('course_id', courseId)
+    .eq('user_id', userId)
+    .in('topic_id', topicIds)
+
+  const topicsWithCards = new Set((existingCards ?? []).map((c: { topic_id: string | null }) => c.topic_id).filter(Boolean))
+  const topicsNeedingCards = topics.filter((t: { topic_id: string }) => !topicsWithCards.has(t.topic_id)).slice(0, 5)
+
+  for (const topic of topicsNeedingCards) {
+    await runFlashcardAgent(userId, courseId, topic.topic_id).catch(() => {})
+  }
 }

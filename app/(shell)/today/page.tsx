@@ -1,6 +1,6 @@
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { runScheduler } from '@/lib/agents/scheduler'
+import { runScheduler, generateUpcomingPreview } from '@/lib/agents/scheduler'
 import { runNudgeChecks, getTopNudge } from '@/lib/agents/nudge'
 import { getUserApiKey } from '@/lib/vault'
 import { TodayClient } from './_client'
@@ -48,7 +48,7 @@ export default async function TodayPage() {
     (c: { course_id: string; name: string }) => !coursesWithSyllabus.has(c.course_id)
   ) as { course_id: string; name: string }[]
 
-  // Run nudge checks and fetch top nudge (fire checks first, then read result)
+  // Run nudge checks and fetch top nudge
   await runNudgeChecks(user.id)
   const activeNudge: ActiveNudge | null = await getTopNudge(user.id)
 
@@ -67,10 +67,33 @@ export default async function TodayPage() {
     tasks = (plan.tasks as TaskItem[]) ?? []
   }
 
+  // Fire-and-forget: generate upcoming 6-day preview (skips days already cached)
+  generateUpcomingPreview(user.id).catch(() => {})
+
+  // Fetch next 6 days' plans for the weekly schedule section
+  const upcomingDates = Array.from({ length: 6 }, (_, i) => {
+    const d = new Date()
+    d.setDate(d.getDate() + i + 1)
+    return d.toISOString().split('T')[0]
+  })
+
+  const { data: upcomingPlans } = await service
+    .from('study_plan')
+    .select('plan_date, tasks')
+    .eq('user_id', user.id)
+    .in('plan_date', upcomingDates)
+    .order('plan_date', { ascending: true })
+
+  const upcomingSchedule = (upcomingPlans ?? []).map((p: { plan_date: string; tasks: TaskItem[] }) => ({
+    date: p.plan_date,
+    tasks: p.tasks as TaskItem[],
+  }))
+
   return (
     <TodayClient
       greeting={greeting(userRow?.display_name ?? 'there')}
       tasks={tasks}
+      upcomingSchedule={upcomingSchedule}
       pendingCount={inboxPending?.length ?? 0}
       streak={userRow?.study_streak ?? 0}
       hasApiKey={!!apiKey}

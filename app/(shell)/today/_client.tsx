@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   Tray,
   ArrowRight,
@@ -17,6 +17,11 @@ import {
   GraduationCap,
   UploadSimple,
   X,
+  Lightbulb,
+  ClipboardText,
+  CalendarBlank,
+  CaretDown,
+  CaretUp,
 } from '@phosphor-icons/react'
 import { StaggerList, StaggerItem, ease } from '@/components/ui/motion'
 import type { TaskItem } from '@/lib/agents/scheduler'
@@ -29,6 +34,15 @@ const COURSE_COLORS = [
   { bg: 'bg-amber-500/10', icon: 'text-amber-600 dark:text-amber-400' },
   { bg: 'bg-rose-500/10', icon: 'text-rose-600 dark:text-rose-400' },
 ]
+
+function InsightCard({ text }: { text: string }) {
+  return (
+    <div className="flex items-start gap-3 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
+      <Lightbulb size={16} className="mt-0.5 shrink-0 text-primary" weight="fill" />
+      <p className="text-sm text-foreground leading-snug">{text}</p>
+    </div>
+  )
+}
 
 function FlashcardTaskCard({ task, index, completed, onComplete }: {
   task: Extract<TaskItem, { type: 'flashcard_review' }>
@@ -66,6 +80,44 @@ function FlashcardTaskCard({ task, index, completed, onComplete }: {
           </Link>
         ) : (
           <span className="text-xs text-muted-foreground shrink-0">No cards yet</span>
+        )}
+      </div>
+    </motion.div>
+  )
+}
+
+function QuizTaskCard({ task, index, completed, onComplete }: {
+  task: Extract<TaskItem, { type: 'practice_quiz' }>
+  index: number
+  completed: boolean
+  onComplete: () => void
+}) {
+  const color = COURSE_COLORS[index % COURSE_COLORS.length]
+  return (
+    <motion.div
+      layout
+      className={`rounded-xl border border-border bg-card transition-opacity ${completed ? 'opacity-50' : ''}`}
+      whileHover={completed ? {} : { scale: 1.003, transition: { duration: 0.15, ease } }}
+      whileTap={completed ? {} : { scale: 0.997 }}
+    >
+      <div className="flex items-center gap-4 p-4">
+        <div className={`flex size-10 shrink-0 items-center justify-center rounded-lg ${color.bg}`}>
+          <ClipboardText size={18} className={color.icon} weight="fill" />
+        </div>
+        <div className="flex flex-1 flex-col gap-0.5 min-w-0">
+          <span className="text-sm font-semibold text-foreground truncate">{task.course_name}</span>
+          <span className="text-xs text-muted-foreground">{task.reason}</span>
+        </div>
+        {completed ? (
+          <CheckCircle size={22} className="shrink-0 text-emerald-500" weight="fill" />
+        ) : (
+          <Link
+            href={`/courses/${task.course_id}`}
+            onClick={onComplete}
+            className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/50 transition-colors shrink-0"
+          >
+            Quiz <ArrowRight size={13} />
+          </Link>
         )}
       </div>
     </motion.div>
@@ -172,9 +224,81 @@ function HomeworkTaskCard({ task, index, completed, onComplete }: {
   )
 }
 
+function WeeklySchedule({ schedule }: { schedule: { date: string; tasks: TaskItem[] }[] }) {
+  const [expanded, setExpanded] = useState(false)
+
+  if (schedule.length === 0) return null
+
+  const displayDays = expanded ? schedule : schedule.slice(0, 3)
+
+  function formatDate(dateStr: string) {
+    const d = new Date(dateStr + 'T12:00:00')
+    const today = new Date()
+    const diff = Math.round((d.getTime() - today.getTime()) / 86400000)
+    if (diff === 1) return 'Tomorrow'
+    const day = d.toLocaleDateString(undefined, { weekday: 'short' })
+    const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    return `${day}, ${date}`
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-2">
+        <CalendarBlank size={14} className="text-muted-foreground" weight="fill" />
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">This Week</h2>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        {displayDays.map(({ date, tasks }) => {
+          const flashcardTasks = tasks.filter(t => t.type === 'flashcard_review') as Extract<TaskItem, { type: 'flashcard_review' }>[]
+          const hwTasks = tasks.filter(t => t.type === 'homework') as Extract<TaskItem, { type: 'homework' }>[]
+          const totalCards = flashcardTasks.reduce((sum, t) => sum + t.card_count, 0)
+          const totalMins = flashcardTasks.reduce((sum, t) => sum + t.duration_minutes, 0)
+
+          return (
+            <div key={date} className="flex items-start gap-3 rounded-xl border border-border bg-card px-4 py-3">
+              <div className="flex w-24 shrink-0 flex-col">
+                <span className="text-xs font-semibold text-foreground">{formatDate(date)}</span>
+              </div>
+              <div className="flex flex-1 flex-wrap gap-x-4 gap-y-1">
+                {totalCards > 0 && (
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <Cards size={11} className="text-primary" />
+                    {totalCards} cards · ~{totalMins} min
+                  </span>
+                )}
+                {hwTasks.map(t => (
+                  <span key={t.assignment_id} className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <ClockCountdown size={11} className="text-amber-500" />
+                    {t.title}
+                  </span>
+                ))}
+                {totalCards === 0 && hwTasks.length === 0 && (
+                  <span className="text-xs text-muted-foreground/60">Nothing scheduled</span>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {schedule.length > 3 && (
+        <button
+          onClick={() => setExpanded(v => !v)}
+          className="flex items-center gap-1 self-start text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          {expanded ? <CaretUp size={11} /> : <CaretDown size={11} />}
+          {expanded ? 'Show less' : `Show ${schedule.length - 3} more days`}
+        </button>
+      )}
+    </div>
+  )
+}
+
 export function TodayClient({
   greeting,
   tasks,
+  upcomingSchedule,
   pendingCount,
   streak,
   hasApiKey,
@@ -183,6 +307,7 @@ export function TodayClient({
 }: {
   greeting: string
   tasks: TaskItem[]
+  upcomingSchedule: { date: string; tasks: TaskItem[] }[]
   pendingCount: number
   streak: number
   hasApiKey: boolean
@@ -193,10 +318,14 @@ export function TodayClient({
   const [completed, setCompleted] = useState<Set<number>>(new Set())
   const [activeNudge, setActiveNudge] = useState<ActiveNudge | null>(initialNudge)
 
+  const insightTask = tasks.find(t => t.type === 'insight') as Extract<TaskItem, { type: 'insight' }> | undefined
   const studyTasks = tasks.filter(t => t.type === 'flashcard_review') as Extract<TaskItem, { type: 'flashcard_review' }>[]
+  const quizTasks = tasks.filter(t => t.type === 'practice_quiz') as Extract<TaskItem, { type: 'practice_quiz' }>[]
   const hwTasks = tasks.filter(t => t.type === 'homework') as Extract<TaskItem, { type: 'homework' }>[]
+
+  const actionableTasks = tasks.filter(t => t.type !== 'insight')
   const completedCount = completed.size
-  const total = tasks.length
+  const total = actionableTasks.length
 
   function markDone(globalIdx: number) {
     setCompleted(prev => new Set([...prev, globalIdx]))
@@ -239,7 +368,10 @@ export function TodayClient({
         </div>
       )}
 
-      {/* System state: API key missing (undismissable) */}
+      {/* AI Insight */}
+      {insightTask && <InsightCard text={insightTask.text} />}
+
+      {/* System state: API key missing */}
       {!hasApiKey && (
         <div className="flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 dark:border-red-900/50 dark:bg-red-950/30">
           <Key size={18} className="shrink-0 text-red-500" weight="fill" />
@@ -256,7 +388,7 @@ export function TodayClient({
         </div>
       )}
 
-      {/* System state: syllabus missing per course (undismissable) */}
+      {/* System state: syllabus missing per course */}
       {missingSyllabus.map(course => (
         <div key={course.course_id} className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900/50 dark:bg-amber-950/30">
           <Warning size={18} className="shrink-0 text-amber-500" weight="fill" />
@@ -292,7 +424,7 @@ export function TodayClient({
         </Link>
       )}
 
-      {/* Study tasks */}
+      {/* Flashcard study tasks */}
       {studyTasks.length > 0 && (
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-2">
@@ -305,8 +437,30 @@ export function TodayClient({
                 <FlashcardTaskCard
                   task={task}
                   index={i}
-                  completed={completed.has(tasks.indexOf(task))}
-                  onComplete={() => markDone(tasks.indexOf(task))}
+                  completed={completed.has(actionableTasks.indexOf(task))}
+                  onComplete={() => markDone(actionableTasks.indexOf(task))}
+                />
+              </StaggerItem>
+            ))}
+          </StaggerList>
+        </div>
+      )}
+
+      {/* Quiz tasks */}
+      {quizTasks.length > 0 && (
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-2">
+            <ClipboardText size={14} className="text-muted-foreground" weight="fill" />
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Practice</h2>
+          </div>
+          <StaggerList className="flex flex-col gap-3">
+            {quizTasks.sort((a, b) => a.order - b.order).map((task, i) => (
+              <StaggerItem key={task.course_id + i}>
+                <QuizTaskCard
+                  task={task}
+                  index={i}
+                  completed={completed.has(actionableTasks.indexOf(task))}
+                  onComplete={() => markDone(actionableTasks.indexOf(task))}
                 />
               </StaggerItem>
             ))}
@@ -327,8 +481,8 @@ export function TodayClient({
                 <HomeworkTaskCard
                   task={task}
                   index={i}
-                  completed={completed.has(tasks.indexOf(task))}
-                  onComplete={() => markDone(tasks.indexOf(task))}
+                  completed={completed.has(actionableTasks.indexOf(task))}
+                  onComplete={() => markDone(actionableTasks.indexOf(task))}
                 />
               </StaggerItem>
             ))}
@@ -336,8 +490,11 @@ export function TodayClient({
         </div>
       )}
 
+      {/* Weekly schedule */}
+      <WeeklySchedule schedule={upcomingSchedule} />
+
       {/* Empty state */}
-      {tasks.length === 0 && missingSyllabus.length === 0 && hasApiKey && !activeNudge && (
+      {actionableTasks.length === 0 && missingSyllabus.length === 0 && hasApiKey && !activeNudge && (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 py-16 text-center">
           <BookOpen size={36} className="text-muted-foreground/40" />
           <p className="text-sm text-muted-foreground">You&apos;re all caught up for today.</p>
