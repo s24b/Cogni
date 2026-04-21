@@ -64,7 +64,7 @@ export async function buildTutorSystemPrompt(
   courseId: string,
   courseName: string,
   mode: TutorMode,
-  opts?: { essayMode?: boolean; assistanceLevel?: AssistanceLevel; courseType?: string; professorId?: string; ragContext?: string }
+  opts?: { essayMode?: boolean; assistanceLevel?: AssistanceLevel; courseType?: string; professorId?: string; ragContext?: string; topics?: { topic_id: string; name: string }[] }
 ): Promise<string> {
   const service = createServiceClient()
 
@@ -101,6 +101,10 @@ Do NOT ask verification or check-your-understanding questions. The student wants
 
   const essaySection = opts?.essayMode ? buildEssaySection(opts.assistanceLevel ?? 'suggest', opts.courseType) : ''
 
+  const topicsSection = opts?.topics && opts.topics.length > 0
+    ? `\n## Course topics (use these IDs when creating artifacts)\nWhen calling create_flashcards or create_quiz, set topic_id to the ID of the best-matching topic from this list. Pick the closest match — if nothing fits well, use the most general relevant topic.\n\n${opts.topics.map(t => `- ${t.topic_id} — ${t.name}`).join('\n')}`
+    : ''
+
   const ragSection = opts?.ragContext
     ? `\n## Retrieved course material\nThe following excerpts come directly from the student's uploaded course files. Treat this as authoritative — it overrides your general knowledge. Do NOT contradict, second-guess, or "correct" information found here based on what you think is standard. If the file says something unusual (e.g. a non-standard constant, a professor-specific rule), trust it and relay it accurately.\n\n${opts.ragContext}`
     : ''
@@ -126,6 +130,7 @@ ${MODE_INSTRUCTIONS[mode]}
 ${learningProfile ?? ''}
 ${weakTopics ? `\nCurrent weak areas:\n${weakTopics}` : ''}
 ${professorSection}
+${topicsSection}
 ${ragSection}
 ${verificationSection}
 

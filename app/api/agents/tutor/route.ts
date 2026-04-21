@@ -106,11 +106,12 @@ export async function POST(request: Request) {
   await saveMessage(sessionId, user.id, 'user', savedUserContent)
 
   const service2 = createServiceClient()
-  const { data: courseRow } = await service2
-    .from('courses')
-    .select('course_type, professor_id')
-    .eq('course_id', courseId)
-    .single()
+  const [{ data: courseRow }, { data: courseTopics }] = await Promise.all([
+    service2.from('courses').select('course_type, professor_id').eq('course_id', courseId).single(),
+    service2.from('topics').select('topic_id, name').eq('course_id', courseId).eq('user_id', user.id).order('syllabus_order', { ascending: true }),
+  ])
+
+  const topics = (courseTopics ?? []) as { topic_id: string; name: string }[]
 
   const [systemPrompt, history] = await Promise.all([
     (async () => {
@@ -124,6 +125,7 @@ export async function POST(request: Request) {
         courseType: courseRow?.course_type ?? undefined,
         professorId: courseRow?.professor_id ?? undefined,
         ragContext,
+        topics,
       })
     })(),
     getSessionMessages(sessionId),
@@ -150,7 +152,8 @@ export async function POST(request: Request) {
       input_schema: {
         type: 'object' as const,
         properties: {
-          topic: { type: 'string', description: 'The topic of the flashcards' },
+          topic: { type: 'string', description: 'The topic of the flashcards (human-readable label shown to the student)' },
+          topic_id: { type: 'string', description: 'The topic_id from the course topics list in your instructions. Pick the best-matching topic. Leave empty string if no topics are loaded.' },
           cards: {
             type: 'array',
             description: 'The flashcard pairs',
@@ -164,7 +167,7 @@ export async function POST(request: Request) {
             },
           },
         },
-        required: ['topic', 'cards'],
+        required: ['topic', 'topic_id', 'cards'],
       },
     },
     {
@@ -173,7 +176,8 @@ export async function POST(request: Request) {
       input_schema: {
         type: 'object' as const,
         properties: {
-          topic: { type: 'string', description: 'The topic of the quiz' },
+          topic: { type: 'string', description: 'The topic of the quiz (human-readable label shown to the student)' },
+          topic_id: { type: 'string', description: 'The topic_id from the course topics list in your instructions. Pick the best-matching topic. Leave empty string if no topics are loaded.' },
           questions: {
             type: 'array',
             description: 'Quiz questions with multiple-choice options',
@@ -189,7 +193,7 @@ export async function POST(request: Request) {
             },
           },
         },
-        required: ['topic', 'questions'],
+        required: ['topic', 'topic_id', 'questions'],
       },
     },
     {
@@ -350,25 +354,23 @@ export async function POST(request: Request) {
                 controller.enqueue(emit({ t: 'essay_edit', target: input.target, replacement: input.replacement, instruction: input.instruction }))
                 toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: 'Edit suggested and shown to student as a tracked change.' })
               } else if (block.name === 'create_flashcards') {
-                const input = block.input as { topic: string; cards: { front: string; back: string }[] }
+                const input = block.input as { topic: string; topic_id: string; cards: { front: string; back: string }[] }
+
+                // Use topic_id provided by AI (chosen from system prompt topic list)
+                const resolvedTopicId = input.topic_id && topics.some(t => t.topic_id === input.topic_id)
+                  ? input.topic_id
+                  : null
 
                 // Save cards to flashcards table so they enter spaced repetition, then emit with card_ids
                 let savedData: { card_id: string; front: string; back: string }[] = input.cards.map(c => ({ card_id: '', front: c.front, back: c.back }))
                 try {
                   const saveSvc = createServiceClient()
-                  const { data: topicRow } = await saveSvc
-                    .from('topics')
-                    .select('topic_id')
-                    .eq('course_id', courseId)
-                    .ilike('name', `%${input.topic}%`)
-                    .limit(1)
-                    .maybeSingle()
                   const defaults = newCardDefaults()
                   const { data: inserted } = await saveSvc.from('flashcards').insert(
                     input.cards.map(card => ({
                       user_id: user.id,
                       course_id: courseId,
-                      topic_id: topicRow?.topic_id ?? null,
+                      topic_id: resolvedTopicId,
                       front: card.front,
                       back: card.back,
                       hint: null,
@@ -384,7 +386,7 @@ export async function POST(request: Request) {
                 const cardList = input.cards.map((c, i) => `${i + 1}. Front: ${c.front} | Back: ${c.back}`).join('\n')
                 toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: `Created ${input.cards.length} flashcards on "${input.topic}" and saved them to the student's deck. Tell the student they're ready and have been added to spaced repetition.\n\nCards you created:\n${cardList}` })
               } else if (block.name === 'create_quiz') {
-                const input = block.input as { topic: string; questions: object[] }
+                const input = block.input as { topic: string; topic_id: string; questions: object[] }
                 controller.enqueue(emit({ t: 'card', kind: 'quiz', topic: input.topic, count: input.questions.length, data: input.questions }))
                 serverInlineCard = { type: 'quiz', topic: input.topic, count: input.questions.length, data: input.questions }
                 const questionList = (input.questions as Array<{ question: string; answer: string; explanation: string }>)
