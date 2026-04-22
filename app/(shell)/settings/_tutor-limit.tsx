@@ -12,13 +12,15 @@ export function TutorLimitPicker({ initial }: { initial: number | null }) {
     if (parsed !== null && (isNaN(parsed) || parsed < 1 || !Number.isInteger(parsed))) return
     setSaving(true)
     try {
-      await fetch('/api/settings/tutor-limit', {
+      const res = await fetch('/api/settings/tutor-limit', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ daily_message_limit: parsed }),
       })
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
+      if (res.ok) {
+        setSaved(true)
+        setTimeout(() => setSaved(false), 2000)
+      }
     } finally {
       setSaving(false)
     }
