@@ -32,6 +32,7 @@ async function compressImageIfNeeded(
 ): Promise<{ buffer: Buffer; mimeType: 'image/jpeg' | 'image/png' | 'image/webp' }> {
   if (buffer.length <= MAX_IMAGE_BYTES) return { buffer, mimeType }
   try {
+    // sharp is native and optional at runtime — lazy-load so a missing binary can't crash the route on import
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const sharp = require('sharp')
     const compressed: Buffer = await sharp(buffer)
@@ -53,6 +54,7 @@ async function extractText(buffer: Buffer, fileType: string, filename: string): 
 
   if (ext === 'pdf' || filename.endsWith('.pdf')) {
     try {
+      // pdf-parse must be lazy-loaded via require — its top-level code crashes at import time
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const pdfParse = require('pdf-parse')
       const data = await pdfParse(buffer)

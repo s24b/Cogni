@@ -302,7 +302,6 @@ export async function POST(request: Request) {
                   inputJson: '',
                 })
                 if (cb.name === 'web_search') {
-                  console.log('[tutor] web_search invoked, block type:', cb.type)
                   controller.enqueue(emit({ t: 'search_start' }))
                 }
               }
@@ -378,6 +377,20 @@ export async function POST(request: Request) {
                     }))
                   ).select('card_id, front, back')
                   if (inserted) savedData = inserted
+
+                  // Update content_coverage for the topic (gates simulated-exam eligibility).
+                  if (resolvedTopicId) {
+                    const { count: cardCount } = await saveSvc
+                      .from('flashcards')
+                      .select('card_id', { count: 'exact', head: true })
+                      .eq('user_id', user.id)
+                      .eq('topic_id', resolvedTopicId)
+                    const coverage = Math.min(1.0, (cardCount ?? input.cards.length) / 10)
+                    await saveSvc
+                      .from('topics')
+                      .update({ content_coverage: coverage })
+                      .eq('topic_id', resolvedTopicId)
+                  }
                 } catch { /* non-critical */ }
 
                 controller.enqueue(emit({ t: 'card', kind: 'flashcards', topic: input.topic, count: savedData.length, data: savedData }))

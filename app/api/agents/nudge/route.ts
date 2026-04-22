@@ -28,6 +28,5 @@ export async function POST() {
     }
   }
 
-  console.log(`[nudge cron] checked ${count} user(s)`)
   return NextResponse.json({ ok: true, count })
 }

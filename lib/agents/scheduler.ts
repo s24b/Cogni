@@ -342,8 +342,6 @@ export async function runScheduler(userId: string): Promise<void> {
       { onConflict: 'user_id,plan_date' }
     )
 
-  console.log(`[scheduler] wrote ${allTasks.length} task(s) for user ${userId} on ${today}`)
-
   // Write to Google Calendar if connected
   const calendarTasks = tasks.filter(t => t.type === 'flashcard_review') as Extract<TaskItem, { type: 'flashcard_review' }>[]
   writeStudyBlocksToCalendar(userId, calendarTasks).catch(e =>

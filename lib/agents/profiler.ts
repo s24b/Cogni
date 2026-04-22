@@ -233,6 +233,7 @@ export async function runProfiler(
 
   if (material.file_type === 'pdf') {
     try {
+      // pdf-parse must be lazy-loaded via require — its top-level code crashes at import time
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const pdfParse = require('pdf-parse')
       const parsed = await pdfParse(buffer)
@@ -244,8 +245,6 @@ export async function runProfiler(
   } else {
     syllabusText = buffer.toString('utf-8')
   }
-
-  console.log(`${tag} extracted ${syllabusText.length} chars from ${material.filename}`)
 
   if (syllabusText.trim().length < 50) {
     console.error(`${tag} syllabus text too short (${syllabusText.length} chars) — skipping`)
@@ -264,8 +263,6 @@ export async function runProfiler(
     console.error(`${tag} Claude call failed`, e)
     return
   }
-
-  console.log(`${tag} Claude returned ${extractedTopics.length} topics, ${extractedExams.length} exams`)
 
   // Deduplicate against existing topics
   const { data: existingTopics } = await service
@@ -309,7 +306,6 @@ export async function runProfiler(
     }
 
     insertedTopics = (data ?? []) as { topic_id: string; name: string }[]
-    console.log(`${tag} inserted ${insertedTopics.length} topics`)
 
     if (insertedTopics.length > 0) {
       await service.from('topic_mastery').insert(
@@ -362,8 +358,6 @@ export async function runProfiler(
       })
       if (examInsertError) console.error(`${tag} exam insert failed`, examInsertError)
     }
-
-    console.log(`${tag} inserted up to ${extractedExams.length} exam records`)
   }
 
   // Fetch professor info for this course
@@ -380,8 +374,6 @@ export async function runProfiler(
         ? (courseRow.professors[0] as { name: string } | undefined)?.name
         : (courseRow?.professors as { name: string } | null)?.name) ?? null
     : null
-
-  console.log(`${tag} professor lookup: professorId=${professorId}, professorName=${professorName}`)
 
   // Build professor wiki from syllabus + any other course material via RAG
   let professorWikiWrite: Promise<void> | null = null
@@ -414,14 +406,10 @@ export async function runProfiler(
     } catch (e) {
       console.error(`${tag} extractProfessorProfile failed`, e)
     }
-    console.log(`${tag} professor profile length: ${professorProfile.length} chars`)
     if (professorProfile) {
       professorWikiWrite = writeWikiFile(userId, wikiFilename, professorProfile, 'profiler')
-        .then(() => console.log(`${tag} wrote ${wikiFilename}`))
         .catch(e => console.error(`${tag} writeWikiFile failed`, e))
     }
-  } else {
-    console.warn(`${tag} SKIPPING professor wiki — missing professorId or professorName`)
   }
 
   // Update general wiki

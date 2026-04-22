@@ -91,6 +91,7 @@ export async function runFlashcardAgent(
     let text = ''
     if (mat.file_type === 'pdf') {
       try {
+        // pdf-parse must be lazy-loaded via require — its top-level code crashes at import time
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const pdfParse = require('pdf-parse')
         text = (await pdfParse(buf)).text
@@ -122,6 +123,20 @@ export async function runFlashcardAgent(
   )
 
   if (error) return { generated: 0, error: error.message }
+
+  // Update content_coverage: ratio of cards to target (10 cards == full coverage).
+  // Simulated-exam filter gates topics by coverage > 0.05, so this must be written or that feature breaks.
+  const { count: cardCount } = await service
+    .from('flashcards')
+    .select('card_id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('topic_id', topicId)
+
+  const coverage = Math.min(1.0, (cardCount ?? cards.length) / 10)
+  await service
+    .from('topics')
+    .update({ content_coverage: coverage })
+    .eq('topic_id', topicId)
 
   await appendToLog(userId, `Flashcard agent generated ${cards.length} cards for topic "${topicName}"`)
 

@@ -120,8 +120,6 @@ export async function POST(request: Request) {
     }
   }
 
-  console.log(`[onboarding] queued ${syllabusJobs.length} syllabus profiling jobs`)
-
   await initWiki(user.id)
 
   // Run profiler for each syllabus (extracts topics + updates wiki)

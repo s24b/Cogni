@@ -103,6 +103,7 @@ export async function POST(request: Request) {
     let text = ''
     if (mat.file_type === 'pdf') {
       try {
+        // pdf-parse must be lazy-loaded via require — its top-level code crashes at import time
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const pdfParse = require('pdf-parse')
         const parsed = await pdfParse(buffer)
