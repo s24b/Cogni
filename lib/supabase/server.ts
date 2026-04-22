@@ -32,8 +32,8 @@ export async function createClient() {
 // site). Switching to the typed ESM import would propagate generic inference
 // through every agent file. Safe to revisit once the join-cast patterns are
 // replaced with generated database types.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 export function createServiceClient() {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { createClient } = require('@supabase/supabase-js')
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
