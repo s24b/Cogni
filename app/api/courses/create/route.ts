@@ -1,0 +1,129 @@
+import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { runProfiler } from '@/lib/agents/profiler'
+import { getUserApiKey } from '@/lib/vault'
+import { ICON_NAMES } from '@/lib/course-icon-names'
+import Anthropic from '@anthropic-ai/sdk'
+import { NextResponse } from 'next/server'
+
+async function assignCourseIcon(userId: string, courseId: string, courseName: string) {
+  const apiKey = await getUserApiKey(userId)
+  if (!apiKey) return
+  const client = new Anthropic({ apiKey })
+  const iconList = ICON_NAMES.join(', ')
+  const colorList = 'blue, violet, emerald, amber, rose, cyan, orange, indigo'
+  try {
+    const msg = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 60,
+      messages: [{
+        role: 'user',
+        content: `Course: "${courseName}". Icons: ${iconList}. Colors: ${colorList}. Pick the best icon and color. JSON only: {"icon":"Name","color":"id"}`,
+      }],
+    })
+    const text = (msg.content[0] as { type: 'text'; text: string }).text
+    const match = text.match(/\{[^}]+\}/)
+    if (!match) return
+    const parsed = JSON.parse(match[0])
+    if (!(ICON_NAMES as readonly string[]).includes(parsed.icon)) return
+    const service = createServiceClient()
+    await service.from('courses').update({ icon: parsed.icon, icon_color: parsed.color ?? 'blue' }).eq('course_id', courseId)
+  } catch { /* silent — icon assignment is best-effort */ }
+}
+
+function inferFileType(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? ''
+  if (ext === 'pdf') return 'pdf'
+  if (ext === 'md') return 'md'
+  return 'txt'
+}
+
+export async function POST(request: Request) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const form = await request.formData()
+  const name = ((form.get('name') as string) ?? '').trim()
+  const professorName = ((form.get('professorName') as string) ?? '').trim()
+  const existingProfessorId = ((form.get('existingProfessorId') as string) ?? '').trim() || null
+  const syllabus = form.get('syllabus') as File | null
+
+  if (!name || !professorName) {
+    return NextResponse.json({ error: 'Course name and professor name are required.' }, { status: 400 })
+  }
+
+  const service = createServiceClient()
+
+  let professorId = existingProfessorId
+  if (!professorId) {
+    const { data: prof, error: profError } = await service
+      .from('professors')
+      .insert({ user_id: user.id, name: professorName })
+      .select('professor_id')
+      .single()
+
+    if (profError || !prof) {
+      return NextResponse.json({ error: profError?.message ?? 'Failed to create professor' }, { status: 500 })
+    }
+    professorId = prof.professor_id
+  }
+
+  const { data: courseRow, error: courseError } = await service
+    .from('courses')
+    .insert({ user_id: user.id, professor_id: professorId, name })
+    .select('course_id')
+    .single()
+
+  if (courseError || !courseRow) {
+    return NextResponse.json({ error: courseError?.message ?? 'Failed to create course' }, { status: 500 })
+  }
+
+  const courseId = courseRow.course_id
+
+  // Await icon assignment so it's committed before the client refreshes
+  await assignCourseIcon(user.id, courseId, name).catch(() => {})
+
+  if (syllabus && syllabus.size > 0) {
+    const ext = syllabus.name.split('.').pop()?.toLowerCase() ?? ''
+    if (!['pdf', 'txt', 'md'].includes(ext)) {
+      return NextResponse.json({ ok: true, courseId, warning: 'Course created, but syllabus must be PDF, TXT, or MD.' })
+    }
+
+    const safeName = syllabus.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const path = `${user.id}/syllabuses/${Date.now()}_${safeName}`
+
+    const { error: uploadError } = await service.storage
+      .from('materials')
+      .upload(path, syllabus, { upsert: false })
+
+    if (uploadError) {
+      return NextResponse.json({ ok: true, courseId, warning: `Course created, syllabus upload failed: ${uploadError.message}` })
+    }
+
+    const { data: material, error: materialError } = await service
+      .from('materials')
+      .insert({
+        user_id: user.id,
+        course_id: courseId,
+        filename: syllabus.name,
+        storage_path: path,
+        tier: 1,
+        file_type: inferFileType(syllabus.name),
+        processing_status: 'processed',
+      })
+      .select('material_id')
+      .single()
+
+    if (materialError || !material) {
+      return NextResponse.json({ ok: true, courseId, warning: `Course created, syllabus metadata failed: ${materialError?.message ?? 'unknown error'}` })
+    }
+
+    try {
+      await runProfiler(user.id, material.material_id, courseId, name)
+    } catch (e) {
+      console.error('[courses/create] profiler failed', e)
+    }
+  }
+
+  return NextResponse.json({ ok: true, courseId })
+}

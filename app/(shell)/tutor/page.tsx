@@ -15,7 +15,7 @@ export default async function TutorPage() {
   const [{ data: courses }, { data: sessions }, anthropicKey] = await Promise.all([
     service
       .from('courses')
-      .select('course_id, name, professors(name)')
+      .select('course_id, name, icon, icon_color, professors(name)')
       .eq('user_id', user.id)
       .eq('active_status', 'active')
       .order('created_at', { ascending: true }),

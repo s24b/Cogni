@@ -43,6 +43,8 @@ export default async function ProgressPage() {
       .select(`
         course_id,
         name,
+        icon,
+        icon_color,
         topics (
           topic_id,
           name,
@@ -211,6 +213,8 @@ export default async function ProgressPage() {
     return {
       course_id: c.course_id as string,
       name: c.name as string,
+      icon: (c.icon as string | null) ?? null,
+      icon_color: (c.icon_color as string | null) ?? null,
       topic_count: topics.length,
       avg_mastery: avgMastery,
       trend,

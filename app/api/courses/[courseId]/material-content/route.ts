@@ -1,0 +1,87 @@
+import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { NextResponse } from 'next/server'
+
+const MAX_CHARS = 20_000
+
+export const runtime = 'nodejs'
+
+export async function GET(
+  request: Request,
+  { params }: { params: Promise<{ courseId: string }> }
+) {
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    const { courseId } = await params
+    const { searchParams } = new URL(request.url)
+    const materialId = searchParams.get('id')
+    if (!materialId) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
+
+    const service = createServiceClient()
+
+    const { data: mat, error: matError } = await service
+      .from('materials')
+      .select('material_id, filename, file_type, storage_path')
+      .eq('material_id', materialId)
+      .eq('course_id', courseId)
+      .eq('user_id', user.id)
+      .single()
+
+    if (matError || !mat) return NextResponse.json({ error: `Material not found: ${matError?.message ?? 'no row'}` }, { status: 404 })
+    if (!mat.storage_path) return NextResponse.json({ error: 'Material has no storage path' }, { status: 422 })
+
+    // Check if this is an image-only PDF by looking for embedding chunks
+    if (mat.file_type === 'pdf') {
+      const { data: chunks } = await service
+        .from('material_embeddings')
+        .select('content, chunk_index')
+        .eq('material_id', materialId)
+        .order('chunk_index', { ascending: true })
+        .limit(1)
+
+      // If we have chunks stored, use them (covers both normal and vision-extracted PDFs)
+      if (chunks && chunks.length > 0) {
+        const { data: allChunks } = await service
+          .from('material_embeddings')
+          .select('content')
+          .eq('material_id', materialId)
+          .order('chunk_index', { ascending: true })
+
+        const content = (allChunks ?? []).map((c: { content: string }) => c.content).join('\n\n').slice(0, MAX_CHARS)
+        return NextResponse.json({ content, filename: mat.filename })
+      }
+    }
+
+    // Download from storage
+    const { data: fileData, error: dlErr } = await service.storage
+      .from('materials')
+      .download(mat.storage_path)
+
+    if (dlErr || !fileData) {
+      return NextResponse.json({ error: `Storage download failed: ${dlErr?.message ?? 'no data'}` }, { status: 500 })
+    }
+
+    let content = ''
+
+    if (mat.file_type === 'pdf') {
+      try {
+        const buffer = Buffer.from(await fileData.arrayBuffer())
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const pdfParse = require('pdf-parse')
+        const parsed = await pdfParse(buffer)
+        content = (parsed.text as string).slice(0, MAX_CHARS)
+      } catch (e) {
+        return NextResponse.json({ error: `Could not parse PDF: ${e instanceof Error ? e.message : 'unknown'}` }, { status: 422 })
+      }
+    } else {
+      content = (await fileData.text()).slice(0, MAX_CHARS)
+    }
+
+    return NextResponse.json({ content, filename: mat.filename })
+  } catch (e) {
+    console.error('[material-content] unhandled error:', e)
+    return NextResponse.json({ error: `Unexpected error: ${e instanceof Error ? e.message : 'unknown'}` }, { status: 500 })
+  }
+}

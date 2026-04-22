@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ArrowLeft,
-  BookOpen,
   Cards,
   Lightning,
   CircleNotch,
@@ -32,6 +31,7 @@ import {
 import { useCallback } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { StaggerList, StaggerItem, ease } from '@/components/ui/motion'
+import { resolveIcon, resolveColor } from '@/lib/course-icons'
 import { QuizSession } from '@/components/quiz/QuizSession'
 
 type Topic = {
@@ -49,6 +49,8 @@ type Course = {
   course_id: string
   name: string
   course_type: string | null
+  icon: string | null
+  icon_color: string | null
   professor_id: string | null
   professor_name: string | null
   topics: Topic[]
@@ -468,11 +470,20 @@ function AudioPlayer({ url, estimatedMinutes }: { url: string; estimatedMinutes:
   )
 }
 
+type AudioOverview = { url: string; created_at: number }
+
 function AudioOverviewSection({ courseId, hasOpenAI }: { courseId: string; hasOpenAI: boolean }) {
-  const [audioUrl, setAudioUrl] = useState<string | null>(null)
-  const [estimatedMinutes, setEstimatedMinutes] = useState(8)
+  const [history, setHistory] = useState<AudioOverview[]>([])
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [expandedIndex, setExpandedIndex] = useState<number | null>(null)
+
+  useEffect(() => {
+    fetch(`/api/agents/audio-overview?courseId=${courseId}`)
+      .then(r => r.json())
+      .then(json => { if (json.overviews) setHistory(json.overviews) })
+      .catch(() => {})
+  }, [courseId])
 
   async function handleGenerate() {
     setGenerating(true)
@@ -485,8 +496,9 @@ function AudioOverviewSection({ courseId, hasOpenAI }: { courseId: string; hasOp
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? 'Generation failed')
-      setAudioUrl(json.url)
-      setEstimatedMinutes(json.estimated_minutes ?? 8)
+      const newOverview: AudioOverview = { url: json.url, created_at: Date.now() }
+      setHistory(prev => [newOverview, ...prev])
+      setExpandedIndex(0)
     } catch (e) {
       setError(String(e).replace('Error: ', ''))
     } finally {
@@ -503,15 +515,9 @@ function AudioOverviewSection({ courseId, hasOpenAI }: { courseId: string; hasOp
     )
   }
 
-  if (audioUrl) {
-    return <AudioPlayer url={audioUrl} estimatedMinutes={estimatedMinutes} />
-  }
-
   return (
-    <div className="flex flex-col gap-2">
-      {error && (
-        <p className="text-xs text-red-500">{error}</p>
-      )}
+    <div className="flex flex-col gap-3">
+      {error && <p className="text-xs text-red-500">{error}</p>}
       <button
         onClick={handleGenerate}
         disabled={generating}
@@ -522,6 +528,36 @@ function AudioOverviewSection({ courseId, hasOpenAI }: { courseId: string; hasOp
           : <><Waveform size={15} className="text-primary" weight="fill" />Generate audio overview</>
         }
       </button>
+      {generating && (
+        <p className="text-center text-xs text-amber-500">Don&apos;t navigate away — your overview will be lost if you leave this page.</p>
+      )}
+      {history.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <p className="text-xs font-medium text-muted-foreground">Past overviews</p>
+          {history.map((ov, i) => {
+            const date = new Date(ov.created_at)
+            const label = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) +
+              ' · ' + date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+            const open = expandedIndex === i
+            return (
+              <div key={ov.created_at} className="rounded-xl border border-border bg-card overflow-hidden">
+                <button
+                  onClick={() => setExpandedIndex(open ? null : i)}
+                  className="flex w-full items-center justify-between px-4 py-3 text-xs text-foreground hover:bg-muted/20 transition-colors"
+                >
+                  <span className="font-medium">{label}</span>
+                  {open ? <CaretUp size={12} /> : <CaretDown size={12} />}
+                </button>
+                {open && (
+                  <div className="px-4 pb-4">
+                    <AudioPlayer url={ov.url} estimatedMinutes={8} />
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -621,6 +657,72 @@ function ArchiveModal({
   )
 }
 
+function DeleteModal({
+  courseName,
+  onConfirm,
+  onCancel,
+}: {
+  courseName: string
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  const [typed, setTyped] = useState('')
+  const [loading, setLoading] = useState(false)
+  const confirmed = typed === courseName
+
+  async function handleConfirm() {
+    if (!confirmed) return
+    setLoading(true)
+    onConfirm()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-background/80 backdrop-blur-sm">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-xl"
+      >
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">Delete course?</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">This permanently deletes all topics, flashcards, and materials.</p>
+          </div>
+          <button
+            onClick={onCancel}
+            className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/50 transition-colors"
+          >
+            <X size={14} />
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <p className="text-xs text-muted-foreground">
+              Type <span className="font-semibold text-foreground">{courseName}</span> to confirm.
+            </p>
+            <input
+              type="text"
+              value={typed}
+              onChange={e => setTyped(e.target.value)}
+              placeholder={courseName}
+              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-destructive/50"
+            />
+          </div>
+          <button
+            onClick={handleConfirm}
+            disabled={!confirmed || loading}
+            className="w-full rounded-xl bg-red-500 px-4 py-3 text-sm font-semibold text-white hover:bg-red-600 disabled:opacity-40 transition-colors"
+          >
+            {loading ? 'Deleting…' : 'Delete course'}
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  )
+}
+
 const MATERIALS_PREVIEW_COUNT = 5
 
 function MaterialsSection({
@@ -680,6 +782,16 @@ export function CourseDetailClient({
   const router = useRouter()
   const [mode, setMode] = useState<Mode>('overview')
   const [showArchiveModal, setShowArchiveModal] = useState(false)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+
+  const HeaderIcon = resolveIcon(course.icon)
+  const headerPalette = resolveColor(course.icon_color)
+
+  async function handleDelete() {
+    await fetch(`/api/courses/${course.course_id}`, { method: 'DELETE' })
+    router.push('/courses')
+    router.refresh()
+  }
 
   async function handleArchive(keepFlashcards: boolean, keepProfessor: boolean) {
     await fetch(`/api/courses/${course.course_id}/archive`, {
@@ -731,8 +843,8 @@ export function CourseDetailClient({
           >
             <ArrowLeft size={16} />
           </button>
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-            <BookOpen size={18} className="text-primary" weight="fill" />
+          <div className={`flex size-9 shrink-0 items-center justify-center rounded-lg ${headerPalette.bg}`}>
+            <HeaderIcon size={18} className={headerPalette.icon} weight="fill" />
           </div>
           <div className="flex flex-1 flex-col min-w-0">
             <span className="text-sm font-semibold text-foreground truncate">{course.name}</span>
@@ -746,6 +858,13 @@ export function CourseDetailClient({
             className="flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
           >
             <Archive size={16} />
+          </button>
+          <button
+            onClick={() => setShowDeleteModal(true)}
+            aria-label="Delete course"
+            className="flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+          >
+            <Trash size={16} />
           </button>
         </div>
 
@@ -858,6 +977,13 @@ export function CourseDetailClient({
             courseName={course.name}
             onConfirm={handleArchive}
             onCancel={() => setShowArchiveModal(false)}
+          />
+        )}
+        {showDeleteModal && (
+          <DeleteModal
+            courseName={course.name}
+            onConfirm={handleDelete}
+            onCancel={() => setShowDeleteModal(false)}
           />
         )}
       </AnimatePresence>

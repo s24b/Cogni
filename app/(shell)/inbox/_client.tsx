@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 import { useDropzone } from 'react-dropzone'
 import {
   FilePdf,
@@ -16,11 +17,15 @@ import {
   Keyboard,
   Check,
   CalendarBlank,
+  ArrowClockwise,
+  ImageBroken,
+  WarningCircle,
+  Image,
 } from '@phosphor-icons/react'
 
 type InboxItem = {
   inbox_item_id: string
-  classification_status: 'pending' | 'classified' | 'unassigned' | 'failed'
+  classification_status: 'pending' | 'classified' | 'unassigned' | 'failed' | 'unreadable'
   course_id: string | null
   tier: number | null
   created_at: string
@@ -59,10 +64,11 @@ const TIER_LABEL: Record<number, string> = {
 
 function StatusBadge({ status }: { status: InboxItem['classification_status'] }) {
   const map = {
-    pending: { dot: 'bg-amber-400', text: 'Processing…', label: 'text-amber-600 dark:text-amber-400' },
-    classified: { dot: 'bg-emerald-400', text: 'Classified', label: 'text-emerald-600 dark:text-emerald-400' },
-    unassigned: { dot: 'bg-orange-400', text: 'Review needed', label: 'text-orange-600 dark:text-orange-400' },
-    failed: { dot: 'bg-red-400', text: 'Failed', label: 'text-red-600 dark:text-red-400' },
+    pending:    { dot: 'bg-amber-400',  text: 'Processing…',    label: 'text-amber-600 dark:text-amber-400' },
+    classified: { dot: 'bg-emerald-400', text: 'Classified',    label: 'text-emerald-600 dark:text-emerald-400' },
+    unassigned: { dot: 'bg-orange-400', text: 'Review needed',  label: 'text-orange-600 dark:text-orange-400' },
+    unreadable: { dot: 'bg-purple-400', text: 'Unreadable',     label: 'text-purple-600 dark:text-purple-400' },
+    failed:     { dot: 'bg-red-400',    text: 'Failed',         label: 'text-red-600 dark:text-red-400' },
   }
   const { dot, text, label } = map[status]
   return (
@@ -77,6 +83,7 @@ function FileIcon({ fileType }: { fileType: string | null }) {
   if (fileType === 'pdf') return <FilePdf size={18} className="text-red-400" weight="fill" />
   if (fileType === 'typed') return <Keyboard size={18} className="text-primary" weight="fill" />
   if (fileType === 'txt' || fileType === 'md') return <FileText size={18} className="text-muted-foreground" weight="fill" />
+  if (fileType === 'png' || fileType === 'jpg' || fileType === 'jpeg' || fileType === 'webp') return <Image size={18} className="text-blue-400" weight="fill" />
   return <File size={18} className="text-muted-foreground" weight="fill" />
 }
 
@@ -95,16 +102,22 @@ function StagedItemRow({
   onRemove,
   onChange,
   onConfirmDueDate,
-  onSkipDueDate,
 }: {
   item: StagedItem
   onRemove: () => void
   onChange: (patch: Partial<StagedItem>) => void
   onConfirmDueDate: (date: string) => void
-  onSkipDueDate: () => void
 }) {
   const [dateInput, setDateInput] = useState(item.detectedDueDate ?? '')
   const [confirmingDate, setConfirmingDate] = useState(false)
+  const [showDateInput, setShowDateInput] = useState(!item.detectedDueDate)
+
+  useEffect(() => {
+    if (item.detectedDueDate) {
+      setDateInput(item.detectedDueDate)
+      setShowDateInput(false)
+    }
+  }, [item.detectedDueDate])
 
   return (
     <div className={`flex flex-col gap-2 rounded-xl border bg-card px-4 py-3 ${
@@ -120,7 +133,7 @@ function StagedItemRow({
             ? <CalendarBlank size={16} className="text-amber-500 shrink-0" weight="fill" />
             : item.type === 'text'
               ? <Keyboard size={16} className="text-primary shrink-0" weight="fill" />
-              : <FileIcon fileType={item.file?.name.endsWith('.pdf') ? 'pdf' : 'txt'} />
+              : <FileIcon fileType={item.file?.name.split('.').pop()?.toLowerCase() ?? 'txt'} />
         }
         <span className="flex-1 text-sm font-medium text-foreground truncate">{item.name}</span>
         {!item.done && !item.awaitingDueDate && (
@@ -139,15 +152,17 @@ function StagedItemRow({
           <p className="text-xs text-amber-700 dark:text-amber-400 font-medium">
             {item.detectedDueDate
               ? `Homework detected — we found a due date: ${new Date(item.detectedDueDate + 'T12:00:00').toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}. Confirm or adjust below.`
-              : 'Homework detected — no due date found in the file. Set one manually or skip.'}
+              : 'Homework detected — no due date found in the file. Set one manually.'}
           </p>
           <div className="flex items-center gap-2">
-            <input
-              type="date"
-              value={dateInput}
-              onChange={e => setDateInput(e.target.value)}
-              className="flex-1 rounded-lg border border-border bg-card px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
-            />
+            {showDateInput && (
+              <input
+                type="date"
+                value={dateInput}
+                onChange={e => setDateInput(e.target.value)}
+                className="flex-1 rounded-lg border border-border bg-card px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+              />
+            )}
             <button
               onClick={async () => {
                 if (!dateInput) return
@@ -161,12 +176,14 @@ function StagedItemRow({
               {confirmingDate ? <CircleNotch size={11} className="animate-spin" /> : <Check size={11} weight="bold" />}
               Confirm
             </button>
-            <button
-              onClick={onSkipDueDate}
-              className="rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted/50 transition-colors"
-            >
-              Skip
-            </button>
+            {!showDateInput && (
+              <button
+                onClick={() => setShowDateInput(true)}
+                className="rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted/50 transition-colors"
+              >
+                Change
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -230,7 +247,14 @@ export function InboxClient({ items: initialItems, courses }: { items: InboxItem
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: { 'application/pdf': ['.pdf'], 'text/plain': ['.txt'], 'text/markdown': ['.md'] },
+    accept: {
+      'application/pdf': ['.pdf'],
+      'text/plain': ['.txt'],
+      'text/markdown': ['.md'],
+      'image/png': ['.png'],
+      'image/jpeg': ['.jpg', '.jpeg'],
+      'image/webp': ['.webp'],
+    },
     multiple: true,
     disabled: processing,
   })
@@ -278,6 +302,20 @@ export function InboxClient({ items: initialItems, courses }: { items: InboxItem
     setTimeout(() => setStaged(prev => prev.filter(s => s.id !== stagedId)), 1500)
   }
 
+  async function retryItem(itemId: string) {
+    setItems(prev => prev.map(i =>
+      i.inbox_item_id === itemId ? { ...i, classification_status: 'pending' } : i
+    ))
+    const res = await fetch(`/api/inbox/items/${itemId}/retry`, { method: 'POST' })
+    if (res.ok) {
+      router.refresh()
+    } else {
+      setItems(prev => prev.map(i =>
+        i.inbox_item_id === itemId ? { ...i, classification_status: 'failed' } : i
+      ))
+    }
+  }
+
   async function assignItem(itemId: string, courseId: string) {
     setItems(prev => prev.map(i =>
       i.inbox_item_id === itemId
@@ -295,10 +333,25 @@ export function InboxClient({ items: initialItems, courses }: { items: InboxItem
     setProcessing(true)
     let anySuccess = false
 
+    // Collect short text notes as shared context hints for file classification.
+    // Short = likely a label/hint ("this is my calc homework"), not actual coursework.
+    const sharedContext = staged
+      .filter(item => !item.done && item.type === 'text' && item.textContent.trim().length < 400)
+      .map(item => item.textContent.trim())
+      .filter(Boolean)
+      .join(' | ')
+
     for (const item of staged) {
       if (item.done) continue
       const form = new FormData()
-      if (item.context) form.append('context', item.context)
+
+      // For files: merge the item's own context hint with any shared text-note context
+      if (item.type === 'file') {
+        const combined = [item.context, sharedContext].filter(Boolean).join(' | ')
+        if (combined) form.append('context', combined)
+      } else if (item.context) {
+        form.append('context', item.context)
+      }
 
       if (item.type === 'file' && item.file) {
         form.append('file', item.file)
@@ -316,6 +369,10 @@ export function InboxClient({ items: initialItems, courses }: { items: InboxItem
         const json = await res.json()
         if (!res.ok) {
           updateItem(item.id, { error: json.error ?? 'Upload failed' })
+        } else if (json.dismissed) {
+          updateItem(item.id, { done: true, error: undefined })
+          toast.info("Looks like a label, not course material — note dismissed.")
+          anySuccess = true
         } else if (json.isHomework && json.courseId) {
           // Homework with a known course — prompt for due date confirmation before clearing
           updateItem(item.id, {
@@ -375,7 +432,7 @@ export function InboxClient({ items: initialItems, courses }: { items: InboxItem
             <p className="text-sm font-medium text-foreground">
               {isDragActive ? 'Drop to add' : 'Drop files or click to browse'}
             </p>
-            <p className="mt-0.5 text-xs text-muted-foreground">PDF, TXT, or Markdown — multiple files supported</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">PDF, TXT, PNG, JPG — multiple files supported</p>
           </div>
         </div>
 
@@ -389,7 +446,6 @@ export function InboxClient({ items: initialItems, courses }: { items: InboxItem
                 onRemove={() => removeItem(item.id)}
                 onChange={patch => updateItem(item.id, patch)}
                 onConfirmDueDate={date => confirmDueDate(item.id, date)}
-                onSkipDueDate={() => skipDueDate(item.id)}
               />
             ))}
           </div>
@@ -458,7 +514,7 @@ export function InboxClient({ items: initialItems, courses }: { items: InboxItem
 
                   <span className="shrink-0 text-xs text-muted-foreground">{timeAgo(item.created_at)}</span>
 
-                  {(item.classification_status === 'unassigned' || item.classification_status === 'failed') && (
+                  {(item.classification_status === 'unassigned' || item.classification_status === 'failed' || item.classification_status === 'unreadable') && (
                     <button
                       onClick={() => dismissItem(item.inbox_item_id)}
                       aria-label="Dismiss"
@@ -469,18 +525,61 @@ export function InboxClient({ items: initialItems, courses }: { items: InboxItem
                   )}
                 </div>
 
-                {item.classification_status === 'unassigned' && courses.length > 0 && (
-                  <div className="flex items-center gap-2 pl-7">
-                    <select
-                      defaultValue=""
-                      onChange={e => { if (e.target.value) assignItem(item.inbox_item_id, e.target.value) }}
-                      className="flex-1 rounded-lg border border-border bg-muted/40 px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+                {item.classification_status === 'unassigned' && (
+                  <div className="flex flex-col gap-2 pl-7">
+                    <div className="flex items-center gap-1.5 text-xs text-orange-600 dark:text-orange-400">
+                      <WarningCircle size={13} weight="fill" />
+                      Couldn&apos;t determine which course this belongs to — assign it below.
+                    </div>
+                    {courses.length > 0 && (
+                      <select
+                        defaultValue=""
+                        onChange={e => { if (e.target.value) assignItem(item.inbox_item_id, e.target.value) }}
+                        className="flex-1 rounded-lg border border-border bg-muted/40 px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+                      >
+                        <option value="" disabled>Assign to a course…</option>
+                        {courses.map(c => (
+                          <option key={c.course_id} value={c.course_id}>{c.name}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                )}
+
+                {item.classification_status === 'unreadable' && (
+                  <div className="flex flex-col gap-2 pl-7">
+                    <div className="flex items-center gap-1.5 text-xs text-purple-600 dark:text-purple-400">
+                      <ImageBroken size={13} weight="fill" />
+                      Couldn&apos;t read this file — it may be an image-only PDF. Assign it manually below.
+                    </div>
+                    {courses.length > 0 && (
+                      <select
+                        defaultValue=""
+                        onChange={e => { if (e.target.value) assignItem(item.inbox_item_id, e.target.value) }}
+                        className="flex-1 rounded-lg border border-border bg-muted/40 px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
+                      >
+                        <option value="" disabled>Assign to a course…</option>
+                        {courses.map(c => (
+                          <option key={c.course_id} value={c.course_id}>{c.name}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                )}
+
+                {item.classification_status === 'failed' && (
+                  <div className="flex items-center gap-3 pl-7">
+                    <div className="flex items-center gap-1.5 text-xs text-red-600 dark:text-red-400">
+                      <WarningCircle size={13} weight="fill" />
+                      Processing failed.
+                    </div>
+                    <button
+                      onClick={() => retryItem(item.inbox_item_id)}
+                      className="flex items-center gap-1 text-xs font-medium text-primary hover:opacity-70 transition-opacity"
                     >
-                      <option value="" disabled>Assign to a course…</option>
-                      {courses.map(c => (
-                        <option key={c.course_id} value={c.course_id}>{c.name}</option>
-                      ))}
-                    </select>
+                      <ArrowClockwise size={12} weight="bold" />
+                      Retry
+                    </button>
                   </div>
                 )}
               </div>

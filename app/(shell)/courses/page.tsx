@@ -16,6 +16,8 @@ export default async function CoursesPage() {
       .select(`
         course_id,
         name,
+        icon,
+        icon_color,
         professors ( name ),
         topics (
           topic_id,
@@ -74,6 +76,8 @@ export default async function CoursesPage() {
     return {
       course_id: c.course_id,
       name: c.name,
+      icon: c.icon ?? null,
+      icon_color: c.icon_color ?? null,
       professor_id: c.professor_id ?? null,
       professor_name: profName,
       topic_count: topics.length,

@@ -41,3 +41,22 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ ok: true, assignment_id: data.assignment_id })
 }
+
+export async function PATCH(request: Request) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const { assignment_id } = await request.json()
+  if (!assignment_id) return NextResponse.json({ error: 'assignment_id required' }, { status: 400 })
+
+  const service = createServiceClient()
+  const { error } = await service
+    .from('assignments')
+    .update({ completion_status: 'complete' })
+    .eq('assignment_id', assignment_id)
+    .eq('user_id', user.id)
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  return NextResponse.json({ ok: true })
+}

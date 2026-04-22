@@ -31,8 +31,13 @@ import {
   MinusCircle,
   PencilSimple,
   Key,
+  StackSimple,
+  FilePdf,
+  FileText,
+  FileMd,
 } from '@phosphor-icons/react'
 import { StaggerList, StaggerItem, ease } from '@/components/ui/motion'
+import { resolveIcon, resolveColor } from '@/lib/course-icons'
 import { BorderBeam } from 'border-beam'
 import { EssayEditor, applyEdit, type AssistanceLevel, type SuggestedEdit } from '@/components/essay/EssayEditor'
 import { QuizSession, type QuizQuestion } from '@/components/quiz/QuizSession'
@@ -40,11 +45,11 @@ import type { GradeSummary } from '@/lib/agents/practice-quiz'
 import { FlashcardViewer } from '@/components/quiz/FlashcardViewer'
 import type { Editor } from '@tiptap/react'
 
-type Course = { course_id: string; name: string; professors: { name: string }[] | { name: string } | null }
+type Course = { course_id: string; name: string; icon: string | null; icon_color: string | null; professors: { name: string }[] | { name: string } | null }
 type Session = { session_id: string; course_id: string; name: string | null; mode: string; created_at: string; essay_content?: string | null }
 type Mode = 'answer' | 'teach' | 'focus'
 type InlineCard = { type: 'flashcards' | 'quiz' | 'essay'; count: number; topic: string; data?: object[] }
-type LocalAttachment = { name: string; type: string; data: string; preview?: string }
+type LocalAttachment = { name: string; type: string; data: string; preview?: string; source?: 'material' }
 type GradeResult = { score: number; rationale: string; topic: string }
 type ChatSegment =
   | { kind: 'thinking'; text: string; done: boolean }
@@ -385,6 +390,172 @@ function readAsBase64(file: File): Promise<string> {
   })
 }
 
+// ── Materials picker ──────────────────────────────────────────────────────────
+
+type CourseMaterial = { material_id: string; filename: string; tier: number; file_type: string }
+
+function MaterialFilePreview({ fileType }: { fileType: string }) {
+  if (fileType === 'pdf') {
+    return (
+      <div className="flex h-20 w-full items-center justify-center rounded-lg bg-red-500/10 border border-red-500/20">
+        <FilePdf size={30} className="text-red-400" weight="fill" />
+      </div>
+    )
+  }
+  if (fileType === 'md') {
+    return (
+      <div className="flex h-20 w-full items-center justify-center rounded-lg bg-blue-500/10 border border-blue-500/20">
+        <FileMd size={30} className="text-blue-400" weight="fill" />
+      </div>
+    )
+  }
+  return (
+    <div className="flex h-20 w-full items-center justify-center rounded-lg bg-muted border border-border">
+      <FileText size={30} className="text-muted-foreground" weight="fill" />
+    </div>
+  )
+}
+
+function MaterialsPickerModal({ courseId, onClose, onAttach }: {
+  courseId: string
+  onClose: () => void
+  onAttach: (attachments: LocalAttachment[]) => void
+}) {
+  const [materials, setMaterials] = useState<CourseMaterial[]>([])
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [loading, setLoading] = useState(true)
+  const [attaching, setAttaching] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    fetch(`/api/courses/${courseId}/materials`)
+      .then(r => r.json())
+      .then(d => setMaterials(d.materials ?? []))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [courseId])
+
+  function toggle(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  async function handleAttach() {
+    if (selected.size === 0) return
+    setAttaching(true)
+    setError(null)
+    const atts: LocalAttachment[] = []
+    for (const id of Array.from(selected)) {
+      try {
+        const res = await fetch(`/api/courses/${courseId}/material-content?id=${id}`)
+        if (!res.ok) {
+          const json = await res.json().catch(() => ({}))
+          setError((json as { error?: string }).error ?? `Failed to load material (${res.status})`)
+          setAttaching(false)
+          return
+        }
+        const { content, filename } = await res.json()
+        if (content) atts.push({ name: filename, type: 'text/plain', data: content, source: 'material' })
+      } catch {
+        setError('Could not load material content. Try again.')
+        setAttaching(false)
+        return
+      }
+    }
+    if (atts.length === 0) {
+      setError('No content could be extracted from the selected files.')
+      setAttaching(false)
+      return
+    }
+    onAttach(atts)
+  }
+
+  const TIER_LABEL: Record<number, string> = { 1: 'Syllabus', 2: 'Primary', 3: 'Practice', 4: 'Past exams' }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-background/70 backdrop-blur-sm sm:items-center">
+      <motion.div
+        initial={{ opacity: 0, y: 24 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 24 }}
+        transition={{ duration: 0.2 }}
+        className="w-full max-w-md rounded-t-2xl sm:rounded-2xl border border-border bg-card shadow-xl flex flex-col overflow-hidden"
+        style={{ maxHeight: '75vh' }}
+      >
+        <div className="flex items-center justify-between px-4 pt-4 pb-3 shrink-0">
+          <div className="flex items-center gap-2">
+            <StackSimple size={14} className="text-primary" weight="fill" />
+            <span className="text-sm font-semibold text-foreground">Course materials</span>
+          </div>
+          <button onClick={onClose} aria-label="Close" className="size-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground">
+            <X size={13} />
+          </button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 px-4 pb-2">
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <CircleNotch size={18} className="animate-spin text-muted-foreground" />
+            </div>
+          ) : materials.length === 0 ? (
+            <p className="py-6 text-center text-xs text-muted-foreground">No processed materials for this course yet.</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-3 pb-2">
+              {materials.map(mat => {
+                const isSelected = selected.has(mat.material_id)
+                return (
+                  <button
+                    key={mat.material_id}
+                    onClick={() => toggle(mat.material_id)}
+                    className={`relative flex flex-col gap-2 rounded-xl border-2 p-2.5 text-left transition-colors ${
+                      isSelected ? 'border-primary bg-primary/5' : 'border-border hover:border-border/80 hover:bg-muted/30'
+                    }`}
+                  >
+                    {isSelected && (
+                      <div className="absolute right-2 top-2 flex size-5 items-center justify-center rounded-full bg-primary">
+                        <CheckCircle size={12} className="text-primary-foreground" weight="fill" />
+                      </div>
+                    )}
+                    <MaterialFilePreview fileType={mat.file_type} />
+                    <div className="flex flex-col gap-0.5 min-w-0">
+                      <span className="text-xs font-medium text-foreground truncate leading-tight">{mat.filename}</span>
+                      <span className="text-[10px] text-muted-foreground">{TIER_LABEL[mat.tier] ?? `Tier ${mat.tier}`}</span>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {error && (
+          <div className="mx-4 mb-2 rounded-lg bg-destructive/10 border border-destructive/20 px-3 py-2">
+            <span className="text-xs text-destructive">{error}</span>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between px-4 py-3 border-t border-border shrink-0">
+          <span className="text-xs text-muted-foreground">{selected.size} selected</span>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted">Cancel</button>
+            <button
+              onClick={handleAttach}
+              disabled={selected.size === 0 || attaching}
+              className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              {attaching ? <CircleNotch size={11} className="animate-spin" /> : null}
+              {attaching ? 'Loading…' : `Attach${selected.size > 0 ? ` ${selected.size}` : ''}`}
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  )
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function TutorClient({ courses, sessions: initialSessions, hasApiKey = true }: { courses: Course[]; sessions: Session[]; hasApiKey?: boolean }) {
@@ -442,6 +613,7 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
   const plusBtnRef = useRef<HTMLButtonElement>(null)
   const inputBarRef = useRef<HTMLDivElement>(null)
   const [dragActive, setDragActive] = useState(false)
+  const [showMaterialsPicker, setShowMaterialsPicker] = useState(false)
 
   useEffect(() => {
     const el = messagesRef.current
@@ -1023,21 +1195,25 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
             <p className="text-sm text-muted-foreground">No courses yet.</p>
           ) : (
             <StaggerList className="flex flex-col gap-2">
-              {courses.map(course => (
-                <StaggerItem key={course.course_id}>
-                  <motion.button
-                    onClick={() => selectCourse(course)}
-                    className="flex w-full items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 text-left hover:bg-muted/30 transition-colors"
-                    whileTap={{ scale: 0.99 }}
-                    transition={{ duration: 0.1 }}
-                  >
-                    <div className="flex size-9 items-center justify-center rounded-lg bg-primary/10">
-                      <BookOpen size={16} className="text-primary" weight="fill" />
-                    </div>
-                    <span className="text-sm font-medium text-foreground">{course.name}</span>
-                  </motion.button>
-                </StaggerItem>
-              ))}
+              {courses.map(course => {
+                const CourseIcon = resolveIcon(course.icon)
+                const palette = resolveColor(course.icon_color)
+                return (
+                  <StaggerItem key={course.course_id}>
+                    <motion.button
+                      onClick={() => selectCourse(course)}
+                      className="flex w-full items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 text-left hover:bg-muted/30 transition-colors"
+                      whileTap={{ scale: 0.99 }}
+                      transition={{ duration: 0.1 }}
+                    >
+                      <div className={`flex size-9 items-center justify-center rounded-lg ${palette.bg}`}>
+                        <CourseIcon size={16} className={palette.icon} weight="fill" />
+                      </div>
+                      <span className="text-sm font-medium text-foreground">{course.name}</span>
+                    </motion.button>
+                  </StaggerItem>
+                )
+              })}
             </StaggerList>
           )}
         </div>
@@ -1130,14 +1306,20 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
           {loadingMessages ? (
             <MessageSkeleton />
           ) : messages.length === 0 ? (
-            <motion.div
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="flex flex-1 flex-col items-center justify-center gap-2 py-12 text-center"
-            >
-              <BookOpen size={32} className="text-muted-foreground/40" weight="fill" />
-              <p className="text-sm text-muted-foreground">Ask anything about {activeCourse.name}.</p>
-            </motion.div>
+            (() => {
+              const EmptyIcon = resolveIcon(activeCourse.icon)
+              const emptyPalette = resolveColor(activeCourse.icon_color)
+              return (
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex flex-1 flex-col items-center justify-center gap-2 py-12 text-center"
+                >
+                  <EmptyIcon size={32} className={`opacity-60 ${emptyPalette.icon}`} weight="fill" />
+                  <p className="text-sm text-muted-foreground">Ask anything about {activeCourse.name}.</p>
+                </motion.div>
+              )
+            })()
           ) : null}
 
           <AnimatePresence initial={false}>
@@ -1209,6 +1391,8 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
                     {att.preview ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={att.preview} alt={att.name} className="size-4 rounded object-cover" />
+                    ) : att.source === 'material' ? (
+                      <StackSimple size={12} className="text-primary shrink-0" weight="fill" />
                     ) : (
                       <Paperclip size={12} className="text-muted-foreground" />
                     )}
@@ -1254,6 +1438,22 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
                       </div>
                       <div className={`h-5 w-9 rounded-full transition-colors ${deepThink ? 'bg-violet-500' : 'bg-muted-foreground/30'}`}>
                         <div className={`mt-0.5 size-4 rounded-full bg-background shadow transition-transform ${deepThink ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                      </div>
+                    </button>
+
+                    {/* Course Materials */}
+                    <button
+                      onClick={() => { setShowMaterialsPicker(true); setShowOptions(false) }}
+                      className="mt-1 flex w-full items-center justify-between rounded-xl px-1 py-1 hover:bg-muted/40 transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="flex size-8 items-center justify-center rounded-lg bg-muted">
+                          <StackSimple size={15} weight="fill" className="text-muted-foreground" />
+                        </div>
+                        <div className="flex flex-col items-start">
+                          <span className="text-sm font-medium text-foreground">Course Materials</span>
+                          <span className="text-[11px] text-muted-foreground">Inject full content of an uploaded file</span>
+                        </div>
                       </div>
                     </button>
 
@@ -1424,57 +1624,69 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
     const essayPct = 100 - chatPct
     const noTransition = isDragging ? 'none' : 'width 380ms cubic-bezier(0.22, 1, 0.36, 1)'
     return (
-      <div
-        ref={splitContainerRef}
-        className={`flex h-full overflow-hidden${isDragging ? ' select-none cursor-col-resize' : ''}`}
-      >
-        {/* Chat panel — animates from 100% → chatPct% on first open */}
-        <motion.div
-          className="flex flex-col overflow-hidden"
-          initial={{ width: '100%' }}
-          animate={{ width: `${chatPct}%` }}
-          transition={{ duration: isDragging ? 0 : 0.38, ease: [0.22, 1, 0.36, 1] }}
-          style={{ minWidth: 0, flexShrink: 0 }}
-        >
-          {chatPanel}
-        </motion.div>
-
-        {/* Draggable divider */}
+      <>
         <div
-          className="w-1 shrink-0 bg-border hover:bg-primary/40 active:bg-primary/60 transition-colors cursor-col-resize"
-          style={{ transition: noTransition === 'none' ? 'none' : undefined }}
-          onMouseDown={handleDividerMouseDown}
-        />
-
-        {/* Essay panel — slides in from right */}
-        <motion.div
-          className="flex flex-col overflow-hidden"
-          initial={{ width: 0, opacity: 0 }}
-          animate={{ width: `${essayPct}%`, opacity: 1 }}
-          transition={{ duration: isDragging ? 0 : 0.38, ease: [0.22, 1, 0.36, 1] }}
-          style={{ minWidth: 0 }}
+          ref={splitContainerRef}
+          className={`flex h-full overflow-hidden${isDragging ? ' select-none cursor-col-resize' : ''}`}
         >
-          <EssayEditor
-            key={essayInitialContent ?? 'new'}
-            initialContent={essayInitialContent}
-            assistance={assistance}
-            onAssistanceChange={handleAssistanceChange}
-            onContentChange={(text, html) => { setEssayText(text); setEssayHtml(html) }}
-            onCopyToClipboard={handleCopyToClipboard}
-            onExportTxt={handleExportTxt}
-            onExportMd={handleExportMd}
-            onExportDocx={handleExportDocx}
-            onExportPdf={handleExportPdf}
-            onClose={() => setEssay(prev => ({ ...prev, open: false }))}
-            editorRef={e => { essayEditorRef.current = e }}
+          {/* Chat panel — animates from 100% → chatPct% on first open */}
+          <motion.div
+            className="flex flex-col overflow-hidden"
+            initial={{ width: '100%' }}
+            animate={{ width: `${chatPct}%` }}
+            transition={{ duration: isDragging ? 0 : 0.38, ease: [0.22, 1, 0.36, 1] }}
+            style={{ minWidth: 0, flexShrink: 0 }}
+          >
+            {chatPanel}
+          </motion.div>
+
+          {/* Draggable divider */}
+          <div
+            className="w-1 shrink-0 bg-border hover:bg-primary/40 active:bg-primary/60 transition-colors cursor-col-resize"
+            style={{ transition: noTransition === 'none' ? 'none' : undefined }}
+            onMouseDown={handleDividerMouseDown}
           />
-        </motion.div>
-      </div>
+
+          {/* Essay panel — slides in from right */}
+          <motion.div
+            className="flex flex-col overflow-hidden"
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: `${essayPct}%`, opacity: 1 }}
+            transition={{ duration: isDragging ? 0 : 0.38, ease: [0.22, 1, 0.36, 1] }}
+            style={{ minWidth: 0 }}
+          >
+            <EssayEditor
+              key={essayInitialContent ?? 'new'}
+              initialContent={essayInitialContent}
+              assistance={assistance}
+              onAssistanceChange={handleAssistanceChange}
+              onContentChange={(text, html) => { setEssayText(text); setEssayHtml(html) }}
+              onCopyToClipboard={handleCopyToClipboard}
+              onExportTxt={handleExportTxt}
+              onExportMd={handleExportMd}
+              onExportDocx={handleExportDocx}
+              onExportPdf={handleExportPdf}
+              onClose={() => setEssay(prev => ({ ...prev, open: false }))}
+              editorRef={e => { essayEditorRef.current = e }}
+            />
+          </motion.div>
+        </div>
+        <AnimatePresence>
+          {showMaterialsPicker && (
+            <MaterialsPickerModal
+              courseId={activeCourse.course_id}
+              onClose={() => setShowMaterialsPicker(false)}
+              onAttach={atts => { setAttachments(prev => [...prev, ...atts]); setShowMaterialsPicker(false) }}
+            />
+          )}
+        </AnimatePresence>
+      </>
     )
   }
 
   // Regular mode: flashcard/quiz split with draggable divider
   return (
+    <>
     <div
       ref={cardSplitContainerRef}
       className={`flex h-full overflow-hidden${cardIsDragging ? ' select-none cursor-col-resize' : ''}`}
@@ -1537,5 +1749,15 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
         )}
       </AnimatePresence>
     </div>
+    <AnimatePresence>
+      {showMaterialsPicker && (
+        <MaterialsPickerModal
+          courseId={activeCourse.course_id}
+          onClose={() => setShowMaterialsPicker(false)}
+          onAttach={atts => { setAttachments(prev => [...prev, ...atts]); setShowMaterialsPicker(false) }}
+        />
+      )}
+    </AnimatePresence>
+    </>
   )
 }

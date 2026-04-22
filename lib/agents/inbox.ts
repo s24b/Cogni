@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import type { DocumentBlockParam, ImageBlockParam, TextBlockParam } from '@anthropic-ai/sdk/resources/messages/messages'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getUserApiKey } from '@/lib/vault'
 import { appendToLog } from '@/lib/wiki'
@@ -9,26 +10,125 @@ import { processEmbeddings } from '@/lib/rag'
 type ClassifyResult = {
   courseId: string | null
   tier: number
-  status: 'classified' | 'unassigned' | 'failed'
+  status: 'classified' | 'unassigned' | 'failed' | 'unreadable'
   isHomework: boolean
   dueDate: string | null
+  dismissed?: boolean
 }
 
-async function extractText(buffer: Buffer, fileType: string, filename: string): Promise<string> {
-  if (fileType === 'txt' || filename.endsWith('.txt') || filename.endsWith('.md')) {
-    return buffer.toString('utf-8')
+type ExtractResult = {
+  text: string
+  isImagePdf: boolean
+  isImageFile: boolean
+  imageMimeType?: 'image/jpeg' | 'image/png' | 'image/webp'
+}
+
+const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'webp'])
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024 // 4MB — Anthropic limit is ~5MB
+
+async function compressImageIfNeeded(
+  buffer: Buffer,
+  mimeType: 'image/jpeg' | 'image/png' | 'image/webp',
+): Promise<{ buffer: Buffer; mimeType: 'image/jpeg' | 'image/png' | 'image/webp' }> {
+  if (buffer.length <= MAX_IMAGE_BYTES) return { buffer, mimeType }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const sharp = require('sharp')
+    const compressed: Buffer = await sharp(buffer)
+      .resize({ width: 2000, height: 2000, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 80 })
+      .toBuffer()
+    return { buffer: compressed, mimeType: 'image/jpeg' }
+  } catch {
+    return { buffer, mimeType }
   }
-  if (fileType === 'pdf' || filename.endsWith('.pdf')) {
+}
+
+async function extractText(buffer: Buffer, fileType: string, filename: string): Promise<ExtractResult> {
+  const ext = fileType.toLowerCase().replace('.', '')
+
+  if (ext === 'txt' || ext === 'md' || filename.endsWith('.txt') || filename.endsWith('.md')) {
+    return { text: buffer.toString('utf-8'), isImagePdf: false, isImageFile: false }
+  }
+
+  if (ext === 'pdf' || filename.endsWith('.pdf')) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const pdfParse = require('pdf-parse')
       const data = await pdfParse(buffer)
-      return data.text
+      const meaningful = (data.text ?? '').replace(/\s+/g, '').length
+      const isImagePdf = meaningful < 50
+      return { text: data.text ?? '', isImagePdf, isImageFile: false }
     } catch {
-      return `[PDF: ${filename}]`
+      return { text: '', isImagePdf: true, isImageFile: false }
     }
   }
-  return `[File: ${filename}]`
+
+  if (IMAGE_EXTS.has(ext)) {
+    const mimeMap: Record<string, 'image/jpeg' | 'image/png' | 'image/webp'> = {
+      png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp',
+    }
+    return { text: '', isImagePdf: false, isImageFile: true, imageMimeType: mimeMap[ext] ?? 'image/jpeg' }
+  }
+
+  return { text: `[File: ${filename}]`, isImagePdf: false, isImageFile: false }
+}
+
+const CLASSIFY_PROMPT = (courseList: string, filename: string, context: string | undefined, content: string) =>
+  `You are classifying a student document. Return ONLY valid JSON, no other text.
+
+Student's courses:
+${courseList || '(no courses)'}
+
+Document filename: ${filename}
+${context ? `User context: ${context}\n` : ''}${content ? `Document content (first 12000 chars):\n${content}` : '(no text content — classify from visual content only)'}
+
+Classify this document:
+1. is_context_hint: true if this is a label, description, or meta-note about files/content rather than actual course material itself. Examples that ARE context hints: "These are my notes for calculus", "Here are my physics homeworks", "This is my syllabus", "Uploading calc stuff". Examples that are NOT context hints: actual lecture notes, problem sets, textbook pages, syllabuses with real content. If the entire content is just one or two sentences describing what something is, it is a context hint.
+2. course_id: which course_id from the list above, or null if none match
+3. tier: 1=syllabus/course overview, 2=primary material (lecture notes, textbook), 3=supplementary (practice problems, past exams), 4=misc/unclear
+4. is_homework: true only if this document contains actual homework problems or assignments a student must complete and submit — false otherwise. A sentence mentioning the word "homework" is NOT homework unless it contains the actual assignment content.
+5. due_date: if is_homework is true, extract the due date as "YYYY-MM-DD", or null if not mentioned
+
+Respond with exactly: {"is_context_hint":<true|false>,"course_id":"<uuid or null>","tier":<1-4>,"is_homework":<true|false>,"due_date":"<YYYY-MM-DD or null>"}`
+
+const EXTRACT_PROMPT = `Transcribe all readable content from this document or image.
+Include all text, equations, labels, headings, and problem statements exactly as they appear.
+Format as plain text. Return ONLY the transcribed content, nothing else.`
+
+function parseClassifyResponse(raw: string): { isContextHint: boolean; courseId: string | null; tier: number; isHomework: boolean; dueDate: string | null } {
+  const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim()
+  const match = cleaned.match(/\{[\s\S]*\}/)
+  const candidate = match ? match[0] : cleaned
+  try {
+    const parsed = JSON.parse(candidate)
+    return {
+      isContextHint: parsed.is_context_hint === true,
+      courseId: parsed.course_id ?? null,
+      tier: typeof parsed.tier === 'number' ? Math.max(1, Math.min(4, parsed.tier)) : 4,
+      isHomework: parsed.is_homework === true,
+      dueDate: typeof parsed.due_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.due_date) ? parsed.due_date : null,
+    }
+  } catch {
+    return { isContextHint: false, courseId: null, tier: 4, isHomework: false, dueDate: null }
+  }
+}
+
+async function extractContentFromVision(
+  client: Anthropic,
+  visualBlock: DocumentBlockParam | ImageBlockParam,
+): Promise<string> {
+  try {
+    const textBlock: TextBlockParam = { type: 'text', text: EXTRACT_PROMPT }
+    const msg = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 4096,
+      messages: [{ role: 'user', content: [visualBlock, textBlock] }],
+    })
+    return msg.content[0].type === 'text' ? msg.content[0].text : ''
+  } catch {
+    return ''
+  }
 }
 
 export async function classifyMaterial(
@@ -68,8 +168,9 @@ export async function classifyMaterial(
   }
 
   const buffer = Buffer.from(await fileData.arrayBuffer())
-  const fullContent = await extractText(buffer, fileType, filename)
+  const { text: fullContent, isImagePdf, isImageFile, imageMimeType } = await extractText(buffer, fileType, filename)
   const content = fullContent.slice(0, 12000)
+  const needsVision = isImagePdf || isImageFile
 
   const courseList = (courses ?? []).map((c: { course_id: string; name: string }) => `- ${c.name} (id: ${c.course_id})`).join('\n')
 
@@ -86,67 +187,60 @@ export async function classifyMaterial(
 
   const client = new Anthropic({ apiKey })
 
-  const message = await client.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 512,
-    messages: [
-      {
-        role: 'user',
-        content: `You are classifying a student document. Return ONLY valid JSON, no other text.
+  let rawResponse: string
+  let visualBlock: DocumentBlockParam | ImageBlockParam | null = null
 
-Student's courses:
-${courseList || '(no courses)'}
-
-Document filename: ${filename}
-${context ? `User context: ${context}\n` : ''}Document content (first 12000 chars):
-${content}
-
-Classify this document:
-1. is_context_hint: true if this is a meta-note or instruction (e.g. "these are my syllabi", "use this to help classify", references other files) rather than actual course material — false otherwise
-2. course_id: which course_id from the list above, or null if none match (ignored if is_context_hint is true)
-3. tier: 1=syllabus/course overview, 2=primary material (lecture notes, textbook), 3=supplementary (practice problems, past exams), 4=misc/unclear (ignored if is_context_hint is true)
-4. is_homework: true if this is a homework assignment, problem set, or assignment sheet that a student needs to submit (NOT lecture notes, past exams, or syllabuses) — false otherwise
-5. due_date: if is_homework is true, extract the due date as "YYYY-MM-DD" string (e.g. "2025-11-15"), or null if no due date is mentioned
-
-Respond with exactly: {"is_context_hint":<true|false>,"course_id":"<uuid or null>","tier":<1-4>,"is_homework":<true|false>,"due_date":"<YYYY-MM-DD or null>"}`,
-      },
-    ],
-  })
-
-  let courseId: string | null = null
-  let tier = 4
-  let isContextHint = false
-  let isHomework = false
-  let dueDate: string | null = null
-
-  const raw = message.content[0].type === 'text' ? message.content[0].text : ''
-  const cleaned = raw
-    .trim()
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```\s*$/i, '')
-    .trim()
-  const match = cleaned.match(/\{[\s\S]*\}/)
-  const candidate = match ? match[0] : cleaned
-
-  try {
-    const parsed = JSON.parse(candidate)
-    isContextHint = parsed.is_context_hint === true
-    courseId = parsed.course_id ?? null
-    tier = typeof parsed.tier === 'number' ? Math.max(1, Math.min(4, parsed.tier)) : 4
-    isHomework = parsed.is_homework === true
-    dueDate = typeof parsed.due_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.due_date)
-      ? parsed.due_date
-      : null
-  } catch (e) {
-    console.error('[inbox] JSON parse failed. Raw response was:\n---\n' + raw.slice(0, 500) + '\n---', e)
+  if (isImagePdf) {
+    const base64Pdf = buffer.toString('base64')
+    visualBlock = {
+      type: 'document',
+      source: { type: 'base64', media_type: 'application/pdf', data: base64Pdf },
+    } satisfies DocumentBlockParam
+  } else if (isImageFile && imageMimeType) {
+    const { buffer: compressed, mimeType: finalMime } = await compressImageIfNeeded(buffer, imageMimeType)
+    const base64Img = compressed.toString('base64')
+    visualBlock = {
+      type: 'image',
+      source: { type: 'base64', media_type: finalMime, data: base64Img },
+    } satisfies ImageBlockParam
   }
+
+  if (needsVision && visualBlock) {
+    try {
+      const textBlock: TextBlockParam = {
+        type: 'text',
+        text: CLASSIFY_PROMPT(courseList, filename, context, ''),
+      }
+      const visionMessage = await client.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 512,
+        messages: [{ role: 'user', content: [visualBlock, textBlock] }],
+      })
+      rawResponse = visionMessage.content[0].type === 'text' ? visionMessage.content[0].text : ''
+    } catch (e) {
+      console.error('[inbox] vision classification failed', e)
+      await service.from('materials').update({ processing_status: 'failed' }).eq('material_id', materialId)
+      await service.from('inbox_items').update({ classification_status: 'unreadable' }).eq('material_id', materialId)
+      await appendToLog(userId, `Inbox: "${filename}" marked unreadable — vision failed`)
+      return { courseId: null, tier: 4, status: 'unreadable', isHomework: false, dueDate: null }
+    }
+  } else {
+    const message = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 512,
+      messages: [{ role: 'user', content: CLASSIFY_PROMPT(courseList, filename, context, content) }],
+    })
+    rawResponse = message.content[0].type === 'text' ? message.content[0].text : ''
+  }
+
+  const { isContextHint, courseId, tier, isHomework, dueDate } = parseClassifyResponse(rawResponse)
 
   // Auto-dismiss context hints — they're not course materials
   if (isContextHint) {
     await service.from('inbox_items').delete().eq('material_id', materialId)
     await service.from('materials').delete().eq('material_id', materialId)
     await appendToLog(userId, `Inbox: "${filename}" auto-dismissed as context hint`)
-    return { courseId: null, tier: 4, status: 'classified', isHomework: false, dueDate: null }
+    return { courseId: null, tier: 4, status: 'classified', isHomework: false, dueDate: null, dismissed: true }
   }
 
   const classificationStatus = courseId ? 'classified' : 'unassigned'
@@ -168,9 +262,16 @@ Respond with exactly: {"is_context_hint":<true|false>,"course_id":"<uuid or null
     `Inbox agent classified "${filename}" → ${classificationStatus === 'classified' ? `${courseName} (Tier ${tier}: ${tierLabel})` : 'unassigned'}`
   )
 
-  // Process embeddings for RAG (fire regardless of tier — all material is searchable)
-  if (fullContent.length > 100 && classificationStatus === 'classified') {
-    await processEmbeddings(userId, materialId, fullContent).catch(e => console.error('[rag] processEmbeddings failed', e))
+  // For vision-processed files, extract full text content for RAG
+  let ragContent = fullContent
+  if (needsVision && visualBlock && classificationStatus === 'classified') {
+    const visionText = await extractContentFromVision(client, visualBlock)
+    if (visionText.length > 100) ragContent = visionText
+  }
+
+  // Process embeddings for RAG
+  if (ragContent.length > 100 && classificationStatus === 'classified') {
+    await processEmbeddings(userId, materialId, ragContent).catch(e => console.error('[rag] processEmbeddings failed', e))
   }
 
   // Auto-run profiler for syllabuses (tier 1) that were successfully classified
@@ -179,7 +280,7 @@ Respond with exactly: {"is_context_hint":<true|false>,"course_id":"<uuid or null
     await runProfiler(userId, materialId, courseId, courseName2)
   }
 
-  // Auto-generate flashcards for tier 1 or 2 materials — find topics with no cards yet
+  // Auto-generate flashcards for tier 1 or 2 materials
   if ((tier === 1 || tier === 2) && courseId && classificationStatus === 'classified') {
     autoGenerateFlashcards(userId, courseId).catch(() => {})
   }

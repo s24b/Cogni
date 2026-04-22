@@ -27,13 +27,17 @@ export async function POST(request: Request) {
 
   if (file) {
     ext = file.name.split('.').pop()?.toLowerCase() ?? ''
-    const allowedExts = ['pdf', 'txt', 'md']
+    const allowedExts = ['pdf', 'txt', 'md', 'png', 'jpg', 'jpeg', 'webp']
     if (!allowedExts.includes(ext)) {
-      return NextResponse.json({ error: 'Unsupported file type. Upload PDF or TXT.' }, { status: 400 })
+      return NextResponse.json({ error: 'Unsupported file type. Upload PDF, TXT, PNG, or JPG.' }, { status: 400 })
     }
     filename = file.name
     fileBlob = file
-    contentType = file.type || 'application/octet-stream'
+    const mimeMap: Record<string, string> = {
+      pdf: 'application/pdf', txt: 'text/plain', md: 'text/markdown',
+      png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp',
+    }
+    contentType = mimeMap[ext] ?? file.type ?? 'application/octet-stream'
   } else {
     // Text entry — store as a .txt material
     const label = (form.get('name') as string | null)?.trim() || 'Note'

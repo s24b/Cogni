@@ -24,16 +24,15 @@ import {
   CaretUp,
 } from '@phosphor-icons/react'
 import { StaggerList, StaggerItem, ease } from '@/components/ui/motion'
+import { resolveColor } from '@/lib/course-icons'
 import type { TaskItem } from '@/lib/agents/scheduler'
 import type { ActiveNudge } from '@/lib/agents/nudge'
 
-const COURSE_COLORS = [
-  { bg: 'bg-blue-500/10', icon: 'text-blue-600 dark:text-blue-400' },
-  { bg: 'bg-violet-500/10', icon: 'text-violet-600 dark:text-violet-400' },
-  { bg: 'bg-emerald-500/10', icon: 'text-emerald-600 dark:text-emerald-400' },
-  { bg: 'bg-amber-500/10', icon: 'text-amber-600 dark:text-amber-400' },
-  { bg: 'bg-rose-500/10', icon: 'text-rose-600 dark:text-rose-400' },
-]
+type CourseIconMap = Record<string, { icon: string | null; icon_color: string | null }>
+
+function courseColor(courseId: string, map: CourseIconMap) {
+  return resolveColor(map[courseId]?.icon_color ?? null)
+}
 
 function InsightCard({ text }: { text: string }) {
   return (
@@ -44,13 +43,14 @@ function InsightCard({ text }: { text: string }) {
   )
 }
 
-function FlashcardTaskCard({ task, index, completed, onComplete }: {
+function FlashcardTaskCard({ task, completed, onComplete, courseIconMap }: {
   task: Extract<TaskItem, { type: 'flashcard_review' }>
-  index: number
   completed: boolean
   onComplete: () => void
+  courseIconMap: CourseIconMap
 }) {
-  const color = COURSE_COLORS[index % COURSE_COLORS.length]
+  const router = useRouter()
+  const color = courseColor(task.course_id, courseIconMap)
   return (
     <motion.div
       layout
@@ -71,13 +71,15 @@ function FlashcardTaskCard({ task, index, completed, onComplete }: {
         {completed ? (
           <CheckCircle size={22} className="shrink-0 text-emerald-500" weight="fill" />
         ) : task.card_count > 0 ? (
-          <Link
-            href={`/review?course=${task.course_id}`}
-            onClick={onComplete}
+          <button
+            onClick={() => {
+              router.push(`/review?course=${task.course_id}`)
+              onComplete()
+            }}
             className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors shrink-0"
           >
             Study <ArrowRight size={13} />
-          </Link>
+          </button>
         ) : (
           <span className="text-xs text-muted-foreground shrink-0">No cards yet</span>
         )}
@@ -86,13 +88,14 @@ function FlashcardTaskCard({ task, index, completed, onComplete }: {
   )
 }
 
-function QuizTaskCard({ task, index, completed, onComplete }: {
+function QuizTaskCard({ task, completed, onComplete, courseIconMap }: {
   task: Extract<TaskItem, { type: 'practice_quiz' }>
-  index: number
   completed: boolean
   onComplete: () => void
+  courseIconMap: CourseIconMap
 }) {
-  const color = COURSE_COLORS[index % COURSE_COLORS.length]
+  const router = useRouter()
+  const color = courseColor(task.course_id, courseIconMap)
   return (
     <motion.div
       layout
@@ -111,13 +114,15 @@ function QuizTaskCard({ task, index, completed, onComplete }: {
         {completed ? (
           <CheckCircle size={22} className="shrink-0 text-emerald-500" weight="fill" />
         ) : (
-          <Link
-            href={`/courses/${task.course_id}`}
-            onClick={onComplete}
+          <button
+            onClick={() => {
+              router.push(`/courses/${task.course_id}`)
+              onComplete()
+            }}
             className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/50 transition-colors shrink-0"
           >
             Quiz <ArrowRight size={13} />
-          </Link>
+          </button>
         )}
       </div>
     </motion.div>
@@ -181,13 +186,13 @@ function NudgeCard({ nudge, onDismiss }: { nudge: ActiveNudge; onDismiss: () => 
   )
 }
 
-function HomeworkTaskCard({ task, index, completed, onComplete }: {
+function HomeworkTaskCard({ task, completed, onComplete, courseIconMap }: {
   task: Extract<TaskItem, { type: 'homework' }>
-  index: number
   completed: boolean
   onComplete: () => void
+  courseIconMap: CourseIconMap
 }) {
-  const color = COURSE_COLORS[index % COURSE_COLORS.length]
+  const color = courseColor(task.course_id, courseIconMap)
   return (
     <motion.div
       layout
@@ -304,6 +309,7 @@ export function TodayClient({
   hasApiKey,
   missingSyllabus,
   activeNudge: initialNudge,
+  courseIconMap,
 }: {
   greeting: string
   tasks: TaskItem[]
@@ -313,6 +319,7 @@ export function TodayClient({
   hasApiKey: boolean
   missingSyllabus: { course_id: string; name: string }[]
   activeNudge: ActiveNudge | null
+  courseIconMap: CourseIconMap
 }) {
   const router = useRouter()
   const [completed, setCompleted] = useState<Set<number>>(new Set())
@@ -324,12 +331,33 @@ export function TodayClient({
   const hwTasks = tasks.filter(t => t.type === 'homework') as Extract<TaskItem, { type: 'homework' }>[]
 
   const actionableTasks = tasks.filter(t => t.type !== 'insight')
-  const completedCount = completed.size
+
+  // A homework task counts as completed if it was already marked complete server-side OR optimistically by this session
+  function isTaskCompleted(task: TaskItem, idx: number): boolean {
+    if (task.type === 'homework' && (task as Extract<TaskItem, { type: 'homework' }>).completion_status === 'complete') return true
+    return completed.has(idx)
+  }
+
+  const completedCount = actionableTasks.reduce((n, t, i) => n + (isTaskCompleted(t, i) ? 1 : 0), 0)
   const total = actionableTasks.length
 
-  function markDone(globalIdx: number) {
+  async function markDone(globalIdx: number, assignmentId?: string) {
     setCompleted(prev => new Set([...prev, globalIdx]))
-    fetch('/api/user/streak', { method: 'POST' }).then(() => router.refresh()).catch(() => {})
+    // No assignmentId = flashcard/quiz task that navigates elsewhere.
+    // Don't refresh — it interferes with the pending <Link> navigation.
+    if (!assignmentId) {
+      fetch('/api/user/streak', { method: 'POST' }).catch(() => {})
+      return
+    }
+    await Promise.all([
+      fetch('/api/assignments', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignment_id: assignmentId }),
+      }).catch(() => {}),
+      fetch('/api/user/streak', { method: 'POST' }).catch(() => {}),
+    ])
+    router.refresh()
   }
 
   return (
@@ -432,11 +460,11 @@ export function TodayClient({
             <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Study</h2>
           </div>
           <StaggerList className="flex flex-col gap-3">
-            {studyTasks.sort((a, b) => a.order - b.order).map((task, i) => (
+            {studyTasks.sort((a, b) => a.order - b.order).map(task => (
               <StaggerItem key={task.course_id}>
                 <FlashcardTaskCard
                   task={task}
-                  index={i}
+                  courseIconMap={courseIconMap}
                   completed={completed.has(actionableTasks.indexOf(task))}
                   onComplete={() => markDone(actionableTasks.indexOf(task))}
                 />
@@ -458,7 +486,7 @@ export function TodayClient({
               <StaggerItem key={task.course_id + i}>
                 <QuizTaskCard
                   task={task}
-                  index={i}
+                  courseIconMap={courseIconMap}
                   completed={completed.has(actionableTasks.indexOf(task))}
                   onComplete={() => markDone(actionableTasks.indexOf(task))}
                 />
@@ -476,16 +504,19 @@ export function TodayClient({
             <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Homework</h2>
           </div>
           <StaggerList className="flex flex-col gap-3">
-            {hwTasks.sort((a, b) => a.order - b.order).map((task, i) => (
-              <StaggerItem key={task.assignment_id}>
-                <HomeworkTaskCard
-                  task={task}
-                  index={i}
-                  completed={completed.has(actionableTasks.indexOf(task))}
-                  onComplete={() => markDone(actionableTasks.indexOf(task))}
-                />
-              </StaggerItem>
-            ))}
+            {hwTasks.sort((a, b) => a.order - b.order).map(task => {
+              const idx = actionableTasks.indexOf(task)
+              return (
+                <StaggerItem key={task.assignment_id}>
+                  <HomeworkTaskCard
+                    task={task}
+                    courseIconMap={courseIconMap}
+                    completed={isTaskCompleted(task, idx)}
+                    onComplete={() => markDone(idx, task.assignment_id)}
+                  />
+                </StaggerItem>
+              )
+            })}
           </StaggerList>
         </div>
       )}

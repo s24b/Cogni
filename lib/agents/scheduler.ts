@@ -21,6 +21,7 @@ export type TaskItem =
       due_date: string
       overdue: boolean
       order: number
+      completion_status?: 'pending' | 'complete' | 'late'
     }
   | {
       type: 'practice_quiz'

@@ -20,6 +20,34 @@ function parseScript(raw: string): ScriptSegment[] {
   return segments
 }
 
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url)
+  const courseId = searchParams.get('courseId')
+  if (!courseId) return NextResponse.json({ overviews: [] })
+
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ overviews: [] })
+
+  const service = createServiceClient()
+
+  const { data: files } = await service.storage.from('audio').list(user.id, { limit: 20 })
+
+  const overviews: { url: string; created_at: number }[] = []
+  for (const file of files ?? []) {
+    if (!file.name.startsWith(`${courseId}_`)) continue
+    const filePath = `${user.id}/${file.name}`
+    const { data: signed } = await service.storage.from('audio').createSignedUrl(filePath, 7200)
+    if (!signed?.signedUrl) continue
+    const tsMatch = file.name.match(/_(\d+)\.mp3$/)
+    const ts = tsMatch ? parseInt(tsMatch[1]) : 0
+    overviews.push({ url: signed.signedUrl, created_at: ts })
+  }
+
+  overviews.sort((a, b) => b.created_at - a.created_at)
+  return NextResponse.json({ overviews })
+}
+
 export async function POST(request: Request) {
   const { courseId } = await request.json() as { courseId: string }
   if (!courseId) return NextResponse.json({ error: 'Missing courseId' }, { status: 400 })

@@ -18,6 +18,7 @@ import {
   ArrowDown,
 } from '@phosphor-icons/react'
 import { StaggerList, StaggerItem } from '@/components/ui/motion'
+import { resolveIcon, resolveColor } from '@/lib/course-icons'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -28,6 +29,8 @@ type Prediction =
 type CourseProgress = {
   course_id: string
   name: string
+  icon: string | null
+  icon_color: string | null
   topic_count: number
   avg_mastery: number
   trend: { date: string; mastery: number }[]
@@ -174,12 +177,19 @@ function PredictionChip({ prediction }: { prediction: Prediction }) {
 }
 
 function CourseCard({ course }: { course: CourseProgress }) {
+  const CourseIcon = resolveIcon(course.icon)
+  const palette = resolveColor(course.icon_color)
   return (
     <div className="flex w-full flex-col gap-4 rounded-xl border border-border bg-card p-4">
       <div className="flex items-start justify-between gap-2">
-        <div className="flex flex-col gap-0.5 min-w-0">
-          <span className="text-sm font-semibold text-foreground truncate">{course.name}</span>
-          <span className="text-xs text-muted-foreground">{course.topic_count} topics</span>
+        <div className="flex items-center gap-3 min-w-0">
+          <div className={`flex size-9 shrink-0 items-center justify-center rounded-lg ${palette.bg}`}>
+            <CourseIcon size={16} className={palette.icon} weight="fill" />
+          </div>
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <span className="text-sm font-semibold text-foreground truncate">{course.name}</span>
+            <span className="text-xs text-muted-foreground">{course.topic_count} topics</span>
+          </div>
         </div>
         <span className={`font-heading text-2xl font-bold tabular-nums shrink-0 ${masteryColor(course.avg_mastery)}`}>
           {Math.round(course.avg_mastery * 100)}%

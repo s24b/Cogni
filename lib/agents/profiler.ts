@@ -267,8 +267,6 @@ export async function runProfiler(
 
   console.log(`${tag} Claude returned ${extractedTopics.length} topics, ${extractedExams.length} exams`)
 
-  if (extractedTopics.length === 0) return
-
   // Deduplicate against existing topics
   const { data: existingTopics } = await service
     .from('topics')
@@ -286,7 +284,6 @@ export async function runProfiler(
         .from('topics')
         .update({ professor_weight: match.professor_weight })
         .eq('topic_id', existing.topic_id)
-        .catch(() => {})
     }
   }
 
@@ -355,14 +352,15 @@ export async function runProfiler(
         .map(name => allTopics.find((t: { name: string }) => t.name.toLowerCase() === name.toLowerCase())?.topic_id)
         .filter(Boolean) as string[]
 
-      await service.from('exams').insert({
+      const { error: examInsertError } = await service.from('exams').insert({
         course_id: courseId,
         user_id: userId,
         date: exam.date,
         grade_weight: exam.grade_weight > 0 ? exam.grade_weight : null,
         duration_minutes: exam.duration_minutes > 0 ? exam.duration_minutes : null,
         topics_covered: topicIds.length > 0 ? topicIds : null,
-      }).catch((e: unknown) => console.error(`${tag} exam insert failed`, e))
+      })
+      if (examInsertError) console.error(`${tag} exam insert failed`, examInsertError)
     }
 
     console.log(`${tag} inserted up to ${extractedExams.length} exam records`)
@@ -383,6 +381,8 @@ export async function runProfiler(
         : (courseRow?.professors as { name: string } | null)?.name) ?? null
     : null
 
+  console.log(`${tag} professor lookup: professorId=${professorId}, professorName=${professorName}`)
+
   // Build professor wiki from syllabus + any other course material via RAG
   let professorWikiWrite: Promise<void> | null = null
   if (professorId && professorName) {
@@ -402,16 +402,26 @@ export async function runProfiler(
 
     const enrichedSyllabus = syllabusText + additionalContext
 
-    const professorProfile = await extractProfessorProfile(
-      client,
-      professorName,
-      courseName,
-      enrichedSyllabus,
-      existing,
-    )
+    let professorProfile = ''
+    try {
+      professorProfile = await extractProfessorProfile(
+        client,
+        professorName,
+        courseName,
+        enrichedSyllabus,
+        existing,
+      )
+    } catch (e) {
+      console.error(`${tag} extractProfessorProfile failed`, e)
+    }
+    console.log(`${tag} professor profile length: ${professorProfile.length} chars`)
     if (professorProfile) {
       professorWikiWrite = writeWikiFile(userId, wikiFilename, professorProfile, 'profiler')
+        .then(() => console.log(`${tag} wrote ${wikiFilename}`))
+        .catch(e => console.error(`${tag} writeWikiFile failed`, e))
     }
+  } else {
+    console.warn(`${tag} SKIPPING professor wiki — missing professorId or professorName`)
   }
 
   // Update general wiki

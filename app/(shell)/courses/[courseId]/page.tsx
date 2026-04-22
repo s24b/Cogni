@@ -21,6 +21,8 @@ export default async function CourseDetailPage({ params }: { params: Promise<{ c
         course_id,
         name,
         course_type,
+        icon,
+        icon_color,
         professor_id,
         professors ( name ),
         topics (
@@ -85,6 +87,8 @@ export default async function CourseDetailPage({ params }: { params: Promise<{ c
     course_id: c.course_id,
     name: c.name,
     course_type: c.course_type ?? null,
+    icon: c.icon ?? null,
+    icon_color: c.icon_color ?? null,
     professor_id: c.professor_id ?? null,
     professor_name: profName,
     topics,
