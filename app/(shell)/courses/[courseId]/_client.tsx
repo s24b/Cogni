@@ -27,6 +27,8 @@ import {
   Play,
   Pause,
   DownloadSimple,
+  Globe,
+  CheckCircle,
 } from '@phosphor-icons/react'
 import { useCallback } from 'react'
 import { useDropzone } from 'react-dropzone'
@@ -764,6 +766,129 @@ function MaterialsSection({
   )
 }
 
+type WebSuggestion = { id: string; title: string | null; url: string | null; content: string }
+
+function WebSuggestionBanner({ courseId, onAdded }: { courseId: string; onAdded: () => void }) {
+  const [suggestion, setSuggestion] = useState<WebSuggestion | null>(null)
+  const [checked, setChecked] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+  const [adding, setAdding] = useState(false)
+  const [done, setDone] = useState(false)
+
+  useEffect(() => {
+    fetch(`/api/courses/${courseId}/web-suggestion`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.suggestion) setSuggestion(data.suggestion)
+      })
+      .catch(() => null)
+      .finally(() => setChecked(true))
+  }, [courseId])
+
+  async function handleAdd() {
+    if (!suggestion || adding) return
+    setAdding(true)
+    try {
+      await fetch(`/api/courses/${courseId}/web-suggestion`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ suggestionId: suggestion.id }),
+      })
+      setDone(true)
+      setTimeout(() => { setSuggestion(null); onAdded() }, 1800)
+    } catch {
+      setAdding(false)
+    }
+  }
+
+  async function handleDismiss() {
+    if (!suggestion) return
+    await fetch(`/api/courses/${courseId}/web-suggestion`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ suggestionId: suggestion.id }),
+    }).catch(() => null)
+    setSuggestion(null)
+  }
+
+  if (!checked || !suggestion) return null
+
+  return (
+    <AnimatePresence>
+      {!done ? (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: 0.2 }}
+          className="flex flex-col gap-3 rounded-xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-900 dark:bg-blue-950/40"
+        >
+          <div className="flex items-start gap-3">
+            <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-blue-100 dark:bg-blue-900">
+              <Globe size={15} className="text-blue-600 dark:text-blue-400" weight="fill" />
+            </div>
+            <div className="flex flex-1 flex-col gap-0.5 min-w-0">
+              <span className="text-sm font-semibold text-foreground">Found a public syllabus online</span>
+              {suggestion.url && (
+                <span className="truncate text-[11px] text-muted-foreground">{suggestion.url}</span>
+              )}
+              {suggestion.title && (
+                <span className="text-xs text-muted-foreground">{suggestion.title}</span>
+              )}
+            </div>
+            <button
+              onClick={handleDismiss}
+              aria-label="Dismiss"
+              className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
+            >
+              <X size={12} />
+            </button>
+          </div>
+
+          <div className="text-xs text-muted-foreground leading-relaxed line-clamp-3 bg-background/60 rounded-lg px-3 py-2 border border-border">
+            {suggestion.content.slice(0, 300)}…
+          </div>
+
+          {expanded && (
+            <div className="text-xs text-muted-foreground leading-relaxed bg-background/60 rounded-lg px-3 py-2 border border-border max-h-40 overflow-y-auto whitespace-pre-wrap">
+              {suggestion.content}
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleAdd}
+              disabled={adding}
+              className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60 transition-colors"
+            >
+              {adding ? <CircleNotch size={12} className="animate-spin" /> : <Check size={12} />}
+              Add to course
+            </button>
+            <button
+              onClick={() => setExpanded(e => !e)}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {expanded ? 'Show less' : 'Show full text'}
+            </button>
+          </div>
+        </motion.div>
+      ) : (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-900 dark:bg-emerald-950/40"
+        >
+          <CheckCircle size={15} className="text-emerald-600 dark:text-emerald-400" weight="fill" />
+          <span className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
+            Syllabus added — topics and materials are being extracted.
+          </span>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  )
+}
+
 type Mode = 'overview' | 'quiz' | 'exam'
 
 export function CourseDetailClient({
@@ -895,6 +1020,9 @@ export function CourseDetailClient({
                 <span className="text-xs text-muted-foreground leading-snug">Timed, mirrors your professor&apos;s style</span>
               </button>
             </div>
+
+            {/* Web syllabus suggestion banner */}
+            <WebSuggestionBanner courseId={course.course_id} onAdded={() => router.refresh()} />
 
             {/* Upload to course */}
             <CourseUpload courseId={course.course_id} onDone={() => router.refresh()} />
