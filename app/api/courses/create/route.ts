@@ -1,6 +1,5 @@
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { runProfiler } from '@/lib/agents/profiler'
-import { runWebEnrichment } from '@/lib/agents/web-enrichment'
 import { getUserApiKey } from '@/lib/vault'
 import { ICON_NAMES } from '@/lib/course-icon-names'
 import Anthropic from '@anthropic-ai/sdk'
@@ -126,15 +125,8 @@ export async function POST(request: Request) {
     } catch (e) {
       console.error('[courses/create] profiler failed', e)
     }
-  } else {
-    // No syllabus uploaded — search the web for public course material
-    const apiKey = await getUserApiKey(user.id)
-    if (apiKey) {
-      runWebEnrichment(user.id, courseId, name, professorName, apiKey).catch(e =>
-        console.error('[courses/create] web-enrichment failed', e)
-      )
-    }
   }
 
-  return NextResponse.json({ ok: true, courseId })
+  // Return hasSyllabus so the client knows whether to trigger web enrichment
+  return NextResponse.json({ ok: true, courseId, hasSyllabus: !!(syllabus && syllabus.size > 0) })
 }

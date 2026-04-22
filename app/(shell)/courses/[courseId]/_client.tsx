@@ -789,11 +789,15 @@ function WebSuggestionBanner({ courseId, onAdded }: { courseId: string; onAdded:
     if (!suggestion || adding) return
     setAdding(true)
     try {
-      await fetch(`/api/courses/${courseId}/web-suggestion`, {
+      const res = await fetch(`/api/courses/${courseId}/web-suggestion`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ suggestionId: suggestion.id }),
       })
+      if (!res.ok) {
+        setAdding(false)
+        return
+      }
       setDone(true)
       setTimeout(() => { setSuggestion(null); onAdded() }, 1800)
     } catch {
@@ -814,9 +818,10 @@ function WebSuggestionBanner({ courseId, onAdded }: { courseId: string; onAdded:
   if (!checked || !suggestion) return null
 
   return (
-    <AnimatePresence>
+    <AnimatePresence mode="wait">
       {!done ? (
         <motion.div
+          key="banner"
           initial={{ opacity: 0, y: -8 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -8 }}
@@ -874,6 +879,7 @@ function WebSuggestionBanner({ courseId, onAdded }: { courseId: string; onAdded:
         </motion.div>
       ) : (
         <motion.div
+          key="success"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}

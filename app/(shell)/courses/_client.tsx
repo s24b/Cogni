@@ -415,6 +415,10 @@ function AddCourseModal({ onClose, onCreated }: { onClose: () => void; onCreated
       } else {
         toast.success('Course created.')
       }
+      // If no syllabus uploaded, trigger web search in its own Vercel function invocation
+      if (!data.hasSyllabus && data.courseId) {
+        fetch(`/api/courses/${data.courseId}/web-enrichment`, { method: 'POST' }).catch(() => null)
+      }
       onCreated()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create course.')

@@ -11,16 +11,28 @@ export async function runWebEnrichment(
   const tag = `[web-enrichment ${courseName}]`
   const client = new Anthropic({ apiKey })
 
+  // Only create one suggestion per course — skip if one already exists (any status)
+  const service = createServiceClient()
+  const { data: existing } = await service
+    .from('course_web_suggestions')
+    .select('id')
+    .eq('course_id', courseId)
+    .limit(1)
+    .maybeSingle()
+
+  if (existing) {
+    console.log(`${tag} suggestion already exists, skipping`)
+    return
+  }
+
   const messages: Anthropic.MessageParam[] = [
     {
       role: 'user',
-      content: `Search the web for the public syllabus or course outline for "${courseName}" taught by professor "${professorName}". Look for a real course document that contains the list of topics covered, exam dates, and grading breakdown. Return the full raw text of whatever you find — do not summarize or paraphrase it, return it verbatim. If you cannot find a clear match for this specific course and professor, reply with exactly: NOT_FOUND`,
+      content: `Search the web for the public syllabus or course outline for "${courseName}" taught by professor "${professorName}". Look for a real course document containing the list of topics covered, exam dates, and grading breakdown. Return the full raw text of whatever you find — do not summarize or paraphrase, return it verbatim. If you cannot find a clear match for this specific course and professor, reply with exactly: NOT_FOUND`,
     },
   ]
 
   let resultText = ''
-  let resultTitle: string | undefined
-  let resultUrl: string | undefined
   let iterations = 0
 
   try {
@@ -29,7 +41,7 @@ export async function runWebEnrichment(
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const streamParams: any = {
-        model: 'claude-haiku-4-5-20251001',
+        model: 'claude-sonnet-4-6',
         max_tokens: 4096,
         tools: [{ type: 'web_search_20250305', name: 'web_search' }],
         messages,
@@ -50,22 +62,11 @@ export async function runWebEnrichment(
 
       const final = await stream.finalMessage()
 
-      // Extract URL/title from web_search result blocks if present
-      for (const block of final.content) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const b = block as any
-        if (b.type === 'tool_result' || b.type === 'web_search_result') {
-          if (b.url && !resultUrl) resultUrl = b.url
-          if (b.title && !resultTitle) resultTitle = b.title
-        }
-      }
-
       if (final.stop_reason === 'tool_use') {
         const hasCustomTools = final.content.some(
           b => b.type === 'tool_use' && (b as Anthropic.ToolUseBlock).name !== 'web_search'
         )
         if (!hasCustomTools) {
-          // Only server-side tools were called — continue loop so model can respond
           messages.push({ role: 'assistant', content: final.content })
           continue
         }
@@ -85,27 +86,9 @@ export async function runWebEnrichment(
     return
   }
 
-  const service = createServiceClient()
-
-  // Only create one pending suggestion per course — skip if one already exists
-  const { data: existing } = await service
-    .from('course_web_suggestions')
-    .select('id')
-    .eq('course_id', courseId)
-    .eq('status', 'pending')
-    .limit(1)
-    .maybeSingle()
-
-  if (existing) {
-    console.log(`${tag} pending suggestion already exists, skipping`)
-    return
-  }
-
   await service.from('course_web_suggestions').insert({
     course_id: courseId,
     user_id: userId,
-    title: resultTitle ?? null,
-    url: resultUrl ?? null,
     content: trimmed,
   })
 
