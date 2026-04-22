@@ -564,6 +564,7 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
+  const [rateLimited, setRateLimited] = useState(false)
   const [splitContent, setSplitContent] = useState<InlineCard | null>(null)
   const [splitExpanded, setSplitExpanded] = useState(false)
   const [showOptions, setShowOptions] = useState(false)
@@ -844,7 +845,7 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
 
   async function sendMessage(textOverride?: string) {
     const text = (textOverride ?? input).trim()
-    if (!text || !activeCourse || sending) return
+    if (!text || !activeCourse || sending || rateLimited) return
     const sentAttachments = textOverride ? [] : [...attachments]
     if (!textOverride) {
       setInput('')
@@ -881,6 +882,12 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
 
       if (!res.ok) {
         const err = await res.json()
+        if (res.status === 429 && err.error === 'rate_limited') {
+          setMessages(prev => prev.slice(0, -2))
+          setInput(text)
+          setRateLimited(true)
+          return
+        }
         setMessages(prev => {
           const updated = [...prev]
           updated[updated.length - 1] = { role: 'assistant', content: `Error: ${err.error ?? 'Something went wrong'}` }
@@ -1617,7 +1624,7 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
                   </button>
                   <button
                     onClick={() => sendMessage()}
-                    disabled={!input.trim() || sending}
+                    disabled={!input.trim() || sending || rateLimited}
                     aria-label="Send message"
                     className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground disabled:opacity-40 hover:bg-primary/90 transition-colors"
                   >
@@ -1773,6 +1780,38 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
           onClose={() => setShowMaterialsPicker(false)}
           onAttach={atts => { setAttachments(prev => [...prev, ...atts]); setShowMaterialsPicker(false) }}
         />
+      )}
+    </AnimatePresence>
+    <AnimatePresence>
+      {rateLimited && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 8 }}
+            transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+            className="mx-4 flex w-full max-w-sm flex-col gap-4 rounded-2xl border border-border bg-card p-6 shadow-xl"
+          >
+            <div className="flex flex-col gap-1.5">
+              <p className="text-sm font-semibold text-foreground">Daily limit reached</p>
+              <p className="text-xs text-muted-foreground">
+                You&apos;ve hit your daily message limit for Tutor. Your limit resets at midnight. You can adjust it in{' '}
+                <a href="/settings" className="text-primary underline-offset-2 hover:underline">Settings → AI &amp; API Keys</a>.
+              </p>
+            </div>
+            <button
+              onClick={() => setRateLimited(false)}
+              className="self-end rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground"
+            >
+              Got it
+            </button>
+          </motion.div>
+        </motion.div>
       )}
     </AnimatePresence>
     </>

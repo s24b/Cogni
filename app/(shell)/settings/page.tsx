@@ -9,6 +9,7 @@ import { CalendarToast } from './_calendar-toast'
 import { VaultKeyField } from './_vault-key-field'
 import { ApiKeyField } from './_key-field'
 import { SessionLengthPicker } from './_session-length'
+import { TutorLimitPicker } from './_tutor-limit'
 import { AppearancePicker } from './_appearance'
 import { AccountSection } from './_account'
 import { KnowledgeStore } from './_knowledge-store'
@@ -26,7 +27,7 @@ export default async function SettingsPage() {
 
   const [calRow, userData, anthropicKey, openaiKey, materialsData, wikiFiles, professorsData] = await Promise.all([
     service.from('calendar_connections').select('cogni_calendar_id').eq('user_id', user.id).eq('provider', 'google').single(),
-    service.from('users').select('session_length_preference, display_name').eq('user_id', user.id).single(),
+    service.from('users').select('session_length_preference, display_name, daily_message_limit').eq('user_id', user.id).single(),
     getUserApiKey(user.id),
     getUserKey(user.id, 'openai_key'),
     service.from('materials').select('course_id, tier, uploaded_at').eq('user_id', user.id).eq('processing_status', 'processed'),
@@ -37,6 +38,7 @@ export default async function SettingsPage() {
   const connected = !!calRow.data
   const calendarName = calRow.data ? 'Cogni Study' : null
   const sessionLength = (userData.data?.session_length_preference as number) ?? 45
+  const dailyMessageLimit = (userData.data?.daily_message_limit as number | null) ?? null
   const anthropicIsSet = !!anthropicKey && anthropicKey.length > 0
   const anthropicPreview = anthropicIsSet ? `••••${anthropicKey!.slice(-4)}` : null
   const openaiIsSet = !!openaiKey && openaiKey.length > 0
@@ -100,6 +102,12 @@ export default async function SettingsPage() {
             placeholder="sk-proj-..."
             learnMoreUrl="https://platform.openai.com/api-keys"
           />
+          <div className="h-px bg-border" />
+          <div className="flex flex-col gap-2">
+            <p className="text-xs font-medium text-foreground">Daily Tutor Message Limit</p>
+            <p className="text-xs text-muted-foreground">Cap how many messages you can send to Tutor per day. Resets at midnight.</p>
+            <TutorLimitPicker initial={dailyMessageLimit} />
+          </div>
         </section>
 
         {/* Study Preferences */}

@@ -96,6 +96,28 @@ export async function POST(request: Request) {
   const apiKey = await getUserApiKey(user.id)
   if (!apiKey) return NextResponse.json({ error: 'No API key configured' }, { status: 402 })
 
+  // Rate limit check
+  const service = createServiceClient()
+  const { data: userRow } = await service
+    .from('users')
+    .select('daily_message_limit')
+    .eq('user_id', user.id)
+    .single()
+
+  if (userRow?.daily_message_limit != null) {
+    const todayStart = new Date()
+    todayStart.setHours(0, 0, 0, 0)
+    const { count } = await service
+      .from('session_messages')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .eq('role', 'user')
+      .gte('created_at', todayStart.toISOString())
+    if ((count ?? 0) >= userRow.daily_message_limit) {
+      return NextResponse.json({ error: 'rate_limited' }, { status: 429 })
+    }
+  }
+
   const sessionId = existingSessionId
     ?? (forceNew
       ? await createSession(user.id, courseId, mode)
