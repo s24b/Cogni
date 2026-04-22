@@ -243,3 +243,5 @@ Vercel Cron Jobs do not run locally (scheduler fires at 5am UTC, nudge at 6am UT
 ## ⚠️ Active Project
 
 Cogni is an active personal project. Most features work as described, but some may have rough edges or occasional bugs — contributions and bug reports are welcome.
+
+> **Live demo** — [cogni-dun-phi.vercel.app](https://cogni-dun-phi.vercel.app) is the author's personal deployment. To use Cogni, deploy your own instance — your data and API keys stay in your own Supabase project.
