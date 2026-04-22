@@ -17,7 +17,7 @@ Cogni decides what to study, when to study, and how — so you just show up. Fee
 
 ## How it works
 
-1. **Upload a syllabus** — Claude extracts topics with professor weights, exam dates, and grade breakdowns. Your course is fully mapped in minutes.
+1. **Upload your course materials** — syllabi, lecture notes, past exams, anything you have. Claude classifies each file, extracts topics with professor weights, exam dates, and grade breakdowns. Your course is fully mapped in minutes.
 2. **Every morning, a plan is generated** — the scheduler scores every topic by mastery deficit, professor weight, and exam proximity. It allocates your session time, orders your flashcard review, and writes study blocks to Google Calendar.
 3. **Open the app and study** — flashcard review, tutor sessions, and quizzes all update your mastery in real time. Tomorrow's plan adapts to what you did today.
 
@@ -96,7 +96,7 @@ You don't decide what to study. Cogni does.
 - **Inbox pipeline** — upload files or notes → Haiku (+ vision) classifies tier, course, and due date → auto-triggers profiler (tier 1) and flashcard generation (tier 1–2).
 - **Wiki memory** — tutor writes durable insights to per-user markdown files (`learning_profile.md`, `weak_areas.md`, `professor_*.md`). Loaded verbatim into every session — no retrieval step.
 - **Practice quiz + simulated exam** — MC and short-answer, auto-graded. Simulated exam mirrors your professor's style and topic weighting using wiki context. Mastery updated on grade.
-- **Audio overview** — Claude generates an audio summary per course, stored in Supabase Storage. Requires OpenAI key.
+- **Audio overview** — Claude Sonnet scripts a two-host podcast from your course materials; OpenAI TTS converts it to audio. Requires both an Anthropic and OpenAI key.
 - **Google Calendar integration** — study blocks scheduled during 8am–10pm, written to a dedicated "Cogni Study" calendar.
 - **BYOK** — Anthropic and OpenAI keys stored in Supabase Vault (encrypted). No AI keys in env vars.
 
