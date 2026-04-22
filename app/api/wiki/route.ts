@@ -4,6 +4,16 @@ import { NextResponse } from 'next/server'
 const BUCKET = 'wiki'
 const HIDDEN = new Set(['index.md'])
 
+function isSafeFilename(name: unknown): name is string {
+  return typeof name === 'string'
+    && name.length > 0
+    && name.length <= 128
+    && !name.includes('/')
+    && !name.includes('\\')
+    && !name.includes('..')
+    && /^[a-zA-Z0-9._-]+$/.test(name)
+}
+
 // GET — list all wiki files with content
 export async function GET() {
   const supabase = await createClient()
@@ -35,8 +45,11 @@ export async function PATCH(request: Request) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { filename, content } = await request.json()
-  if (!filename || typeof content !== 'string') {
+  if (!isSafeFilename(filename) || typeof content !== 'string') {
     return NextResponse.json({ error: 'filename and content required' }, { status: 400 })
+  }
+  if (content.length > 200_000) {
+    return NextResponse.json({ error: 'content too large' }, { status: 413 })
   }
   if (HIDDEN.has(filename)) {
     return NextResponse.json({ error: 'Cannot edit this file' }, { status: 403 })
@@ -67,7 +80,7 @@ export async function DELETE(request: Request) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { filename } = await request.json()
-  if (!filename) return NextResponse.json({ error: 'filename required' }, { status: 400 })
+  if (!isSafeFilename(filename)) return NextResponse.json({ error: 'filename required' }, { status: 400 })
   if (HIDDEN.has(filename)) {
     return NextResponse.json({ error: 'Cannot delete this file' }, { status: 403 })
   }

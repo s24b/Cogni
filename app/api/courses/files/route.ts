@@ -39,6 +39,10 @@ export async function POST(request: Request) {
   if (file.size > MAX_MB * 1024 * 1024) {
     return NextResponse.json({ error: `File too large (max ${MAX_MB} MB)` }, { status: 413 })
   }
+  const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
+  if (!['pdf', 'txt', 'md', 'docx', 'png', 'jpg', 'jpeg', 'webp'].includes(ext)) {
+    return NextResponse.json({ error: 'Unsupported file type.' }, { status: 400 })
+  }
 
   const bytes = Buffer.from(await file.arrayBuffer())
   const record = await uploadCourseFile(user.id, courseId, {

@@ -25,7 +25,11 @@ export async function POST(request: Request) {
   let fileBlob: Blob
   let contentType: string
 
+  const MAX_UPLOAD_BYTES = 25 * 1024 * 1024 // 25 MB
   if (file) {
+    if (file.size > MAX_UPLOAD_BYTES) {
+      return NextResponse.json({ error: 'File too large (max 25 MB).' }, { status: 413 })
+    }
     ext = file.name.split('.').pop()?.toLowerCase() ?? ''
     const allowedExts = ['pdf', 'txt', 'md', 'png', 'jpg', 'jpeg', 'webp']
     if (!allowedExts.includes(ext)) {
@@ -39,6 +43,9 @@ export async function POST(request: Request) {
     }
     contentType = mimeMap[ext] ?? file.type ?? 'application/octet-stream'
   } else {
+    if (textContent!.length > 500_000) {
+      return NextResponse.json({ error: 'Text too long (max 500,000 chars).' }, { status: 413 })
+    }
     // Text entry — store as a .txt material
     const label = (form.get('name') as string | null)?.trim() || 'Note'
     filename = `${label.replace(/[^a-zA-Z0-9 _-]/g, '').trim()}_${Date.now()}.txt`

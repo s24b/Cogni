@@ -207,3 +207,27 @@ Audited all 13 `messages.create` sites. All caps right-sized after the audio fix
 
 ### Operations required before / during next deploy
 No new ops for Session 6. Session 3's list still applies.
+
+---
+
+## Session 7 — Security (commit pending)
+
+### Fixed
+- **Wiki filename path-injection (`app/api/wiki/route.ts`).** PATCH/DELETE handlers concatenated user-supplied `filename` into `${user.id}/${filename}` and wrote via the service client (which bypasses storage RLS). A filename like `../other-user/file.md` would have reached another user's folder. Added `isSafeFilename()` (regex `^[a-zA-Z0-9._-]+$`, length ≤128, no slashes or `..`), applied to both PATCH and DELETE. PATCH also now caps content at 200,000 chars (defense against giant writes). Legitimate callers (`learning_profile.md`, `weak_areas.md`, `professor_<uuid>.md`) all still pass the regex.
+- **Upload size + MIME gaps.**
+  - `app/api/inbox/upload/route.ts` — added 25 MB size cap on files and 500,000-char cap on text entries. Extension whitelist was already present.
+  - `app/api/onboarding/upload-syllabus/route.ts` — added 25 MB size cap and extension whitelist (`pdf | txt | md | docx`). This route accepted arbitrary files before.
+  - `app/api/courses/files/route.ts` — added extension whitelist (`pdf | txt | md | docx | png | jpg | jpeg | webp`). 20 MB size cap was already present.
+- **Open-redirect hardening (`app/auth/callback/route.ts`).** The `next` query param was concatenated with `origin` without validation. Same-origin prefix neutralized most attacks, but `next=//evil.com` could theoretically become protocol-relative in some parsers. Added guard: `next` must start with `/` and NOT `//`, else defaults to `/`. Defense-in-depth.
+
+### Verified unchanged (no issue)
+- **`createServiceClient` is server-only.** `lib/supabase/server.ts` imports `next/headers` (`cookies()`), which Next.js rejects at build time in any file that transitively reaches a Client Component. Service role key env var is `SUPABASE_SERVICE_ROLE_KEY` (no `NEXT_PUBLIC_` prefix, so never shipped to browser bundles). Grep confirmed no `'use client'` file imports it.
+- **API key leakage to client — none.** Settings endpoints return presence booleans and preview-only (`••••${last4}`); `/api/user/keys` GET never returns `key_value`. No route returns `apiKey` / `anthropicKey` / `openaiKey` in a response body. No `NEXT_PUBLIC_*_KEY` other than `NEXT_PUBLIC_SUPABASE_ANON_KEY` (designed-public, gated by RLS).
+- **Vault key never logged.** `lib/vault.ts` and `lib/user-keys.ts` log the Supabase error object and user ID only — never the returned key string. Audited all `console.*` call sites across `lib/` and `app/api/` — no key-value variables appear in log arguments.
+- **Auth redirects are server-controlled.** Every `redirect('/auth')` and `NextResponse.redirect(...)` target is a fixed string or derived from `NEXT_PUBLIC_APP_URL` + a static path. Only the `/auth/callback` route's `next` param was user-influenced, now hardened above. Calendar OAuth callback additionally binds `state` to the current session (Session 3 fix).
+
+### Risk posture after Phase 21
+BYOK model, RLS on every user-owned table, service client firewalled server-side, file uploads size+MIME-capped, cron jobs authenticated, OAuth state session-bound, no user-controlled path concatenation with service client. Remaining technical debt (pre-existing): OpenAI key still stored in `user_keys` plaintext rather than Vault — tracked separately in `memory/project_technical_debt.md`, to be addressed after Phase 19 Settings is in place.
+
+### Operations required before / during next deploy
+Same as Session 3: run `supabase/fsrs-review-rpc.sql` in the Supabase SQL editor and confirm `CRON_SECRET` is set in Vercel env. No new ops added by Session 7.

@@ -10,6 +10,14 @@ export async function POST(request: Request) {
   const file = form.get('file') as File | null
   if (!file) return NextResponse.json({ error: 'No file' }, { status: 400 })
 
+  if (file.size > 25 * 1024 * 1024) {
+    return NextResponse.json({ error: 'File too large (max 25 MB).' }, { status: 413 })
+  }
+  const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
+  if (!['pdf', 'txt', 'md', 'docx'].includes(ext)) {
+    return NextResponse.json({ error: 'Unsupported file type. Upload a PDF, TXT, MD, or DOCX.' }, { status: 400 })
+  }
+
   const service = createServiceClient()
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
   const path = `${user.id}/syllabuses/${Date.now()}_${safeName}`
