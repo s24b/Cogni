@@ -171,9 +171,9 @@ Audited every `client.messages.create(...)` call across 7 files. All assignments
 | Audio overview script (`audio-overview/route.ts:133`) | Sonnet 4.6 | podcast-style dialogue |
 | Tutor main loop (`tutor/route.ts:274`) | Sonnet 4.6 / Opus 4.7 | interactive teaching |
 
-**Spec deviations (two) — deliberate cost choices, flagged but not changed:**
-- Checklist says Profiler should use Sonnet. Actually uses Haiku 4.5. Task is deterministic JSON extraction; Haiku is sufficient. Upgrading would cost ~10× per run with marginal quality improvement.
-- Checklist says "verification grading" should use Sonnet. Short-answer grading uses Haiku 4.5 at 200 max_tokens. Task is a bounded rubric check against a model answer; Haiku is sufficient. If Arshawn wants higher-quality written feedback, we can upgrade.
+**Spec deviations (two) — one resolved, one kept:**
+- **Profiler upgraded to Sonnet 4.6 (2026-04-21, post-Session-6 decision).** Both `extractTopicsAndExams` and `extractProfessorProfile` now run on Sonnet. Reason: the profiler prompt is long (12,000 chars of syllabus) and produces multi-field JSON with real judgment calls (`professor_weight` 0–1, `grade_weight`, exam-to-topic mapping). Public production guides flag Haiku 4.5's weakness as "skipping steps or ignoring minor constraints, especially in long prompts — tiny, painful deviations when output must be JSON" (Sider, Caylent). `professor_weight` is the highest-leverage signal in the whole system (scheduler priority, simulated exam topic distribution, weak-areas ranking), and a miscalibrated weight ripples into every downstream decision. The profiler runs ~once per syllabus upload (≤10× per semester per student), so the 3× per-token cost difference is a one-time ~$0.50 at most — trivial.
+- **Short-answer grading kept on Haiku 4.5.** Prompt is ~300 tokens, output is a tight 3-field JSON capped at 200 tokens, and the model answer acts as a rubric constraining the judgment. This is the "constrained task" regime where Haiku 4.5 is documented to match Sonnet 4 quality. Haiku's long-prompt weakness doesn't apply here.
 
 ### Verified — extended thinking gating
 `app/api/agents/tutor/route.ts:274-285`:
