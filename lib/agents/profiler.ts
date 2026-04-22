@@ -273,15 +273,20 @@ export async function runProfiler(
   const existingNames = new Set((existingTopics ?? []).map((t: { name: string }) => t.name.toLowerCase()))
   const newTopics = extractedTopics.filter(t => !existingNames.has(t.name.toLowerCase()))
 
-  // Update professor_weight on existing topics that match by name
-  for (const existing of existingTopics ?? []) {
-    const match = extractedTopics.find(t => t.name.toLowerCase() === existing.name.toLowerCase())
-    if (match) {
-      await service
-        .from('topics')
-        .update({ professor_weight: match.professor_weight })
-        .eq('topic_id', existing.topic_id)
-    }
+  // Update professor_weight on existing topics that match by name — issue in parallel
+  const weightUpdates = (existingTopics ?? [])
+    .map((existing: { topic_id: string; name: string }) => {
+      const match = extractedTopics.find(t => t.name.toLowerCase() === existing.name.toLowerCase())
+      return match ? { topic_id: existing.topic_id, professor_weight: match.professor_weight } : null
+    })
+    .filter(Boolean) as { topic_id: string; professor_weight: number }[]
+
+  if (weightUpdates.length > 0) {
+    await Promise.all(
+      weightUpdates.map(u =>
+        service.from('topics').update({ professor_weight: u.professor_weight }).eq('topic_id', u.topic_id)
+      )
+    )
   }
 
   let insertedTopics: { topic_id: string; name: string }[] = []
@@ -327,36 +332,39 @@ export async function runProfiler(
     ] as { topic_id: string; name: string }[]
 
     const today = new Date().toISOString().split('T')[0]
+    const futureExams = extractedExams.filter(e => e.date >= today)
 
-    for (const exam of extractedExams) {
-      // Only insert future exams
-      if (exam.date < today) continue
-
-      // Check if exam already exists for this course on this date
-      const { data: existingExam } = await service
+    if (futureExams.length > 0) {
+      // One query for all existing exam dates on this course, then batch insert the rest.
+      const { data: existingExamRows } = await service
         .from('exams')
-        .select('exam_id')
+        .select('date')
         .eq('course_id', courseId)
         .eq('user_id', userId)
-        .eq('date', exam.date)
-        .single()
+        .in('date', futureExams.map(e => e.date))
 
-      if (existingExam) continue
+      const existingDates = new Set(((existingExamRows ?? []) as { date: string }[]).map(r => r.date))
 
-      // Map topic names to IDs
-      const topicIds = exam.topics
-        .map(name => allTopics.find((t: { name: string }) => t.name.toLowerCase() === name.toLowerCase())?.topic_id)
-        .filter(Boolean) as string[]
+      const examRowsToInsert = futureExams
+        .filter(exam => !existingDates.has(exam.date))
+        .map(exam => {
+          const topicIds = exam.topics
+            .map(name => allTopics.find((t: { name: string }) => t.name.toLowerCase() === name.toLowerCase())?.topic_id)
+            .filter(Boolean) as string[]
+          return {
+            course_id: courseId,
+            user_id: userId,
+            date: exam.date,
+            grade_weight: exam.grade_weight > 0 ? exam.grade_weight : null,
+            duration_minutes: exam.duration_minutes > 0 ? exam.duration_minutes : null,
+            topics_covered: topicIds.length > 0 ? topicIds : null,
+          }
+        })
 
-      const { error: examInsertError } = await service.from('exams').insert({
-        course_id: courseId,
-        user_id: userId,
-        date: exam.date,
-        grade_weight: exam.grade_weight > 0 ? exam.grade_weight : null,
-        duration_minutes: exam.duration_minutes > 0 ? exam.duration_minutes : null,
-        topics_covered: topicIds.length > 0 ? topicIds : null,
-      })
-      if (examInsertError) console.error(`${tag} exam insert failed`, examInsertError)
+      if (examRowsToInsert.length > 0) {
+        const { error: examInsertError } = await service.from('exams').insert(examRowsToInsert)
+        if (examInsertError) console.error(`${tag} exam batch insert failed`, examInsertError)
+      }
     }
   }
 

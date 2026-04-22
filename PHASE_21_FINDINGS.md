@@ -99,10 +99,47 @@ These are new React 19 lint rules that fire on legitimate patterns. No behavior 
 - **`app/(shell)/progress/page.tsx:32` Cannot call impure function during render** — `notFound()` from Next.js, called during server-component render. Intentional Next.js pattern.
 - **`next lint` invocation** — `npx next lint` fails with "invalid project directory" (Next 16 regression on this repo's directory name). Use `npm run lint` (which calls `eslint` directly) instead.
 
-### Gap noted for Session 6 (token/wiki scope)
-The tutor system prompt no longer injects `weak_areas.md` (the unused fetch was removed). The profiler still writes the file, and we still inject **weak *topics* from `topic_mastery`** into the prompt — so weak-area context is not fully lost. But the wiki file itself is currently write-only. Session 6 should decide: (a) inject it bounded, (b) stop generating it, or (c) use it only inside the profiler's own loop.
+### Gap noted for Session 6 (token/wiki scope) — RESOLVED 2026-04-21
+The tutor system prompt no longer injects `weak_areas.md` (the unused fetch was removed). **Decision (Arshawn, 2026-04-21): option (c) — keep the file profiler-only.** The profiler continues to write `weak_areas.md`; nothing in the tutor path reads it. The tutor still injects the bottom-10 weak topics from `topic_mastery`, which covers the tutor's needs. Rationale: the narrative-style weak-area file is useful for the profiler to track drift across runs, but the mastery score list is sufficient signal for the tutor. No Session 6 action required on this item — just confirm the profiler still writes it and no other code reads it.
 
 ### Operations required before / during next deploy
 No new ops for Session 4. Session 3's list still applies:
 1. Run `supabase/fsrs-review-rpc.sql` in the Supabase SQL editor.
 2. Confirm `CRON_SECRET` env var is set in Vercel.
+
+---
+
+## Session 5 — DB + query efficiency (commit pending)
+
+### Fixed (N+1 patterns)
+- **`lib/agents/scheduler.ts:runScheduler` first per-course loop.** Previously did 3 queries × N courses (topics, topic_mastery, due flashcards). Replaced with 3 total queries using `.in('course_id', courseIds)` + Map-based grouping in memory. For a user with 6 active courses this drops 18 DB round trips to 3.
+- **`lib/agents/scheduler.ts:runScheduler` quiz-candidates loop.** Was 2 queries × N courses (`practice_test_results` latest + `flashcards` count). Now 2 total: one `.in('course_id', courseIds)` query ordered by `created_at desc` → first hit per course is the latest; one `.in('course_id', courseIds)` card fetch tallied into `cardCountByCourse` Map.
+- **`lib/agents/scheduler.ts:generateUpcomingPreview`.** Worst N+1 in the codebase — nested loop did 6 days × (1 plan-exists check + N per-course due-cards query + 1 assignments query) = up to 6 + 6N + 6 queries, plus 6 per-day inserts. Rewrote as 3 batched queries across the full 6-day window (`study_plan` by `plan_date in dateStrs`, `flashcards` by `course_id in courseIds AND fsrs_next_review_date in dateStrs`, `assignments` with range `gte windowStart, lt windowEndExclusive`) + 1 batched `insert(rowsToInsert)` at the end. For 6 courses × 6 days: ~43 queries → 4.
+- **`lib/agents/practice-quiz.ts:gradeAndRecord`.** The resolved-topics loop used to do 2 queries per matched topic (topic lookup + mastery fetch). Replaced with one `.eq('course_id', courseId)` topics fetch and one `.in('topic_id', topicIds)` mastery fetch, followed by a single `upsert` for mastery and single `insert` for `mastery_history`.
+- **`lib/agents/profiler.ts` existing-topic weight updates.** Was sequential `await service.from('topics').update(...).eq(...)` inside a for-loop. Converted to `Promise.all` parallel updates. Still N queries but issued concurrently, cutting wall-clock from N × RTT to ~1 × RTT. (A bulk CASE/upsert would require refactoring the `existingTopics` select to include all non-nullable columns — out of scope.)
+- **`lib/agents/profiler.ts` per-exam check-then-insert.** Was 1 existence check + 1 insert per exam. Replaced with a single `.in('date', futureDates)` existence query + one batched `insert(examRowsToInsert)`.
+
+### Verified unchanged
+- **RLS coverage** (re-verified). All 17 tables in `schema.sql` plus `practice_test_results`, `course_files`, `user_keys`, `calendar_connections` have `enable row level security` and an `auth.uid() = user_id` policy. No table is exposed.
+- **Index coverage for the new batched queries.**
+  - `topics(course_id)` — covers `from('topics').in('course_id', courseIds)`.
+  - `flashcards(user_id, course_id)` + `flashcards(fsrs_next_review_date)` — covers both scheduler flashcards queries.
+  - `topic_mastery(user_id, topic_id)` — covers `.eq('user_id').in('topic_id', topicIds)`.
+  - `assignments(user_id, due_date)` — covers `gte`/`lt` window filters.
+  - `study_plan UNIQUE(user_id, plan_date)` — auto-indexed, covers `plan_date in dateStrs`.
+  - `exams(course_id, date)` — covers profiler's batched existence check.
+- **Storage bucket policies.** Four buckets in use: `course-files`, `materials`, `wiki`, `audio`. `course-files` has explicit `storage.objects` RLS policies in `supabase/course-files.sql` (owner_upload/read/delete keyed on `auth.uid() = (storage.foldername(name))[1]`). All reads/writes to `materials`, `wiki`, `audio` go through route handlers using the **service client** (`createServiceClient`), which bypasses RLS — these are server-only, never exposed to browser clients. No client-side storage exposure.
+- **Atomic FSRS RPC** (Session 3) still the only path hit by `/api/cards/review`.
+
+### Gaps noted but not fixed
+- **`practice_test_results` has no index** on `(user_id, course_id, created_at)`. The new batched scheduler query `.eq(user_id).in(course_id).order(created_at desc)` will full-scan the table. Low severity today (few rows per user) but worth adding as usage grows. **Action:** add `create index on public.practice_test_results(user_id, course_id, created_at desc);` in a future migration.
+- **Storage buckets `materials`, `wiki`, `audio` have no SQL-defined `storage.objects` policies.** They're configured via the Supabase dashboard (or rely on the service-client bypass). If any client-side code ever touches these buckets directly, it will be unprotected. **Action:** mirror the `course-files` owner-read policy pattern into a migration for consistency.
+
+### Performance impact (illustrative, 6-course user)
+- `runScheduler`: ~24 queries → ~9 queries (~63% drop).
+- `generateUpcomingPreview`: ~43 queries → ~4 queries (~90% drop).
+- `gradeAndRecord` (20-question quiz hitting 8 topics): ~18 queries → ~5 queries (~72% drop).
+- `runProfiler` with 10 existing topics + 4 exams: from 14 sequential RTTs → 2 batched + 1 parallel wave (N remains but concurrent).
+
+### Operations required before / during next deploy
+No new ops for Session 5. Session 3's list still applies. Future-optional: add the two indexes flagged above.

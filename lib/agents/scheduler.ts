@@ -122,34 +122,64 @@ export async function runScheduler(userId: string): Promise<void> {
 
   const scored: CourseScore[] = []
 
+  // Batch the three per-course queries into three queries across all courses.
+  // Previously: 3 × N round trips for N courses. Now: 3 round trips total.
+  const courseIds = courses.map((c: { course_id: string; name: string }) => c.course_id)
+
+  const [topicsResult, dueCardsResult] = await Promise.all([
+    service
+      .from('topics')
+      .select('course_id, topic_id, name, professor_weight')
+      .in('course_id', courseIds),
+    service
+      .from('flashcards')
+      .select('card_id, topic_id, course_id')
+      .eq('user_id', userId)
+      .in('course_id', courseIds)
+      .lte('fsrs_next_review_date', today),
+  ])
+
+  const allTopics = (topicsResult.data ?? []) as { course_id: string; topic_id: string; name: string; professor_weight: number }[]
+  const topicsByCourse = new Map<string, typeof allTopics>()
+  for (const t of allTopics) {
+    const arr = topicsByCourse.get(t.course_id) ?? []
+    arr.push(t)
+    topicsByCourse.set(t.course_id, arr)
+  }
+
+  const allTopicIds = allTopics.map(t => t.topic_id)
+  const { data: masteryRows } = allTopicIds.length > 0
+    ? await service
+        .from('topic_mastery')
+        .select('topic_id, mastery_score')
+        .eq('user_id', userId)
+        .in('topic_id', allTopicIds)
+    : { data: [] as { topic_id: string; mastery_score: number | null }[] }
+
+  const masteryMap: Record<string, number> = {}
+  for (const m of (masteryRows ?? []) as { topic_id: string; mastery_score: number | null }[]) {
+    masteryMap[m.topic_id] = Number(m.mastery_score ?? 0)
+  }
+
+  const dueCardsByCourse = new Map<string, { card_id: string; topic_id: string | null }[]>()
+  for (const c of (dueCardsResult.data ?? []) as { card_id: string; topic_id: string | null; course_id: string }[]) {
+    const arr = dueCardsByCourse.get(c.course_id) ?? []
+    arr.push({ card_id: c.card_id, topic_id: c.topic_id })
+    dueCardsByCourse.set(c.course_id, arr)
+  }
+
   for (const course of courses) {
     const multiplier = examProximityMultiplier(nextExamByCourse[course.course_id] ?? null)
+    const topics = topicsByCourse.get(course.course_id) ?? []
+    if (topics.length === 0) continue
 
-    const { data: topics } = await service
-      .from('topics')
-      .select('topic_id, name, professor_weight')
-      .eq('course_id', course.course_id)
-
-    if (!topics || topics.length === 0) continue
-
-    const topicIds = topics.map((t: { topic_id: string; name: string; professor_weight: number }) => t.topic_id)
-
-    const { data: mastery } = await service
-      .from('topic_mastery')
-      .select('topic_id, mastery_score')
-      .eq('user_id', userId)
-      .in('topic_id', topicIds)
-
-    const masteryMap: Record<string, number> = {}
-    for (const m of mastery ?? []) {
-      masteryMap[m.topic_id] = Number(m.mastery_score ?? 0)
-    }
+    const topicIds = topics.map(t => t.topic_id)
 
     let totalPriority = 0
     let totalMastery = 0
     let weakestTopic: { name: string; mastery: number } | null = null
 
-    for (const topic of topics as { topic_id: string; name: string; professor_weight: number }[]) {
+    for (const topic of topics) {
       const pw = Number(topic.professor_weight ?? 0.5)
       const ms = masteryMap[topic.topic_id] ?? 0
       const deficit = Math.max(0, pw - ms)
@@ -162,16 +192,9 @@ export async function runScheduler(userId: string): Promise<void> {
     const avgPriority = totalPriority / topics.length
     const avgMastery = totalMastery / topics.length
 
-    // Cards due today for this course
-    const { data: dueCards } = await service
-      .from('flashcards')
-      .select('card_id, topic_id')
-      .eq('user_id', userId)
-      .eq('course_id', course.course_id)
-      .lte('fsrs_next_review_date', today)
-
-    const dueCount = dueCards?.length ?? 0
-    const dueTopicIds = [...new Set((dueCards ?? []).map((c: { card_id: string; topic_id: string | null }) => c.topic_id).filter(Boolean) as string[])]
+    const dueCards = dueCardsByCourse.get(course.course_id) ?? []
+    const dueCount = dueCards.length
+    const dueTopicIds = [...new Set(dueCards.map(c => c.topic_id).filter(Boolean) as string[])]
 
     if (dueCount === 0 && avgPriority < 0.01) continue
 
@@ -214,33 +237,42 @@ export async function runScheduler(userId: string): Promise<void> {
   // Practice quiz tasks — one per course where it makes sense
   const quizCandidates: { course_id: string; course_name: string; reason: string; priority: number }[] = []
 
+  // Batch per-course lookups into two queries total.
+  const [quizHistoryResult, allCardsResult] = await Promise.all([
+    service
+      .from('practice_test_results')
+      .select('course_id, created_at')
+      .eq('user_id', userId)
+      .in('course_id', courseIds)
+      .order('created_at', { ascending: false }),
+    service
+      .from('flashcards')
+      .select('course_id')
+      .eq('user_id', userId)
+      .in('course_id', courseIds),
+  ])
+
+  const latestQuizByCourse = new Map<string, string>()
+  for (const q of (quizHistoryResult.data ?? []) as { course_id: string; created_at: string }[]) {
+    if (!latestQuizByCourse.has(q.course_id)) latestQuizByCourse.set(q.course_id, q.created_at)
+  }
+
+  const cardCountByCourse = new Map<string, number>()
+  for (const c of (allCardsResult.data ?? []) as { course_id: string }[]) {
+    cardCountByCourse.set(c.course_id, (cardCountByCourse.get(c.course_id) ?? 0) + 1)
+  }
+
   for (const course of courses) {
     const courseScore = scored.find(s => s.course_id === course.course_id)
     const daysToExam = nextExamByCourse[course.course_id] ?? null
     const avgMastery = courseScore?.avg_mastery ?? 0
 
-    // Check last quiz date for this course
-    const { data: lastQuiz } = await service
-      .from('practice_test_results')
-      .select('created_at')
-      .eq('user_id', userId)
-      .eq('course_id', course.course_id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single()
-
-    const daysSinceQuiz = lastQuiz
-      ? Math.floor((Date.now() - new Date(lastQuiz.created_at).getTime()) / 86400000)
+    const latestQuizAt = latestQuizByCourse.get(course.course_id)
+    const daysSinceQuiz = latestQuizAt
+      ? Math.floor((Date.now() - new Date(latestQuizAt).getTime()) / 86400000)
       : 999
 
-    // Check if there are enough cards to quiz on
-    const { count: cardCount } = await service
-      .from('flashcards')
-      .select('card_id', { count: 'exact', head: true })
-      .eq('user_id', userId)
-      .eq('course_id', course.course_id)
-
-    const hasEnoughCards = (cardCount ?? 0) >= 5
+    const hasEnoughCards = (cardCountByCourse.get(course.course_id) ?? 0) >= 5
 
     const examSoon = daysToExam !== null && daysToExam <= 14
     const readyForQuiz = avgMastery >= 0.3 && daysSinceQuiz > 5 && hasEnoughCards
@@ -362,66 +394,97 @@ export async function generateUpcomingPreview(userId: string): Promise<void> {
   if (!courses || courses.length === 0) return
 
   const courseNameMap: Record<string, string> = {}
-  for (const c of courses) courseNameMap[c.course_id] = c.name
+  const courseIds: string[] = []
+  for (const c of courses) {
+    courseNameMap[c.course_id] = c.name
+    courseIds.push(c.course_id)
+  }
 
+  // Build the 6-day window upfront.
+  const dateStrs: string[] = []
   for (let dayOffset = 1; dayOffset <= 6; dayOffset++) {
     const d = new Date()
     d.setDate(d.getDate() + dayOffset)
-    const dateStr = d.toISOString().split('T')[0]
+    dateStrs.push(d.toISOString().split('T')[0])
+  }
+  const windowStart = dateStrs[0]
+  const windowEndExclusive = (() => {
+    const d = new Date()
+    d.setDate(d.getDate() + 7)
+    return d.toISOString().split('T')[0]
+  })()
 
-    // Skip if plan already exists for this date
-    const { data: existing } = await service
+  // Batch: existing plans + all due cards in window + all pending homework in window.
+  const [existingPlansResult, dueCardsResult, assignmentsResult] = await Promise.all([
+    service
       .from('study_plan')
-      .select('plan_id')
+      .select('plan_date')
       .eq('user_id', userId)
-      .eq('plan_date', dateStr)
-      .single()
-
-    if (existing) continue
-
-    const tasks: TaskItem[] = []
-    let order = 1
-
-    // Cards due on this day
-    for (const course of courses) {
-      const { data: dueCards } = await service
-        .from('flashcards')
-        .select('card_id, topic_id')
-        .eq('user_id', userId)
-        .eq('course_id', course.course_id)
-        .eq('fsrs_next_review_date', dateStr)
-
-      const count = dueCards?.length ?? 0
-      if (count === 0) continue
-
-      const topicIds = [...new Set((dueCards ?? []).map((c: { topic_id: string | null }) => c.topic_id).filter(Boolean) as string[])]
-
-      tasks.push({
-        type: 'flashcard_review',
-        course_id: course.course_id,
-        course_name: course.name,
-        topic_ids: topicIds,
-        card_count: count,
-        duration_minutes: Math.max(5, Math.round(count * 1.5)),
-        priority_score: 0,
-        order: order++,
-      })
-    }
-
-    // Homework due on this day
-    const dayEnd = new Date(d)
-    dayEnd.setDate(dayEnd.getDate() + 1)
-    const dayEndStr = dayEnd.toISOString().split('T')[0]
-
-    const { data: assignments } = await service
+      .in('plan_date', dateStrs),
+    service
+      .from('flashcards')
+      .select('card_id, topic_id, course_id, fsrs_next_review_date')
+      .eq('user_id', userId)
+      .in('course_id', courseIds)
+      .in('fsrs_next_review_date', dateStrs),
+    service
       .from('assignments')
       .select('assignment_id, name, due_date, course_id')
       .eq('user_id', userId)
       .eq('completion_status', 'pending')
-      .gte('due_date', dateStr)
-      .lt('due_date', dayEndStr)
+      .gte('due_date', windowStart)
+      .lt('due_date', windowEndExclusive),
+  ])
 
-    for (const a of assignments ?? []) {
+  const existingPlanDates = new Set(
+    ((existingPlansResult.data ?? []) as { plan_date: string }[]).map(p => p.plan_date)
+  )
+
+  // Group due cards by (date, course) via nested Map.
+  const cardsByDateCourse = new Map<string, Map<string, { topic_id: string | null }[]>>()
+  for (const c of (dueCardsResult.data ?? []) as { card_id: string; topic_id: string | null; course_id: string; fsrs_next_review_date: string }[]) {
+    let byCourse = cardsByDateCourse.get(c.fsrs_next_review_date)
+    if (!byCourse) { byCourse = new Map(); cardsByDateCourse.set(c.fsrs_next_review_date, byCourse) }
+    const arr = byCourse.get(c.course_id) ?? []
+    arr.push({ topic_id: c.topic_id })
+    byCourse.set(c.course_id, arr)
+  }
+
+  const assignmentsByDate = new Map<string, { assignment_id: string; name: string; due_date: string; course_id: string }[]>()
+  for (const a of (assignmentsResult.data ?? []) as { assignment_id: string; name: string; due_date: string; course_id: string }[]) {
+    const arr = assignmentsByDate.get(a.due_date) ?? []
+    arr.push(a)
+    assignmentsByDate.set(a.due_date, arr)
+  }
+
+  const rowsToInsert: { user_id: string; plan_date: string; tasks: TaskItem[]; generated_at: string }[] = []
+
+  for (const dateStr of dateStrs) {
+    if (existingPlanDates.has(dateStr)) continue
+
+    const tasks: TaskItem[] = []
+    let order = 1
+
+    const byCourse = cardsByDateCourse.get(dateStr)
+    if (byCourse) {
+      for (const course of courses) {
+        const dueCards = byCourse.get(course.course_id)
+        if (!dueCards || dueCards.length === 0) continue
+        const topicIds = [...new Set(dueCards.map(c => c.topic_id).filter(Boolean) as string[])]
+        tasks.push({
+          type: 'flashcard_review',
+          course_id: course.course_id,
+          course_name: course.name,
+          topic_ids: topicIds,
+          card_count: dueCards.length,
+          duration_minutes: Math.max(5, Math.round(dueCards.length * 1.5)),
+          priority_score: 0,
+          order: order++,
+        })
+      }
+    }
+
+    for (const a of assignmentsByDate.get(dateStr) ?? []) {
       tasks.push({
         type: 'homework',
         course_id: a.course_id,
@@ -436,10 +499,16 @@ export async function generateUpcomingPreview(userId: string): Promise<void> {
 
     if (tasks.length === 0) continue
 
-    await service
-      .from('study_plan')
-      .insert({ user_id: userId, plan_date: dateStr, tasks, generated_at: new Date().toISOString() })
-      .then(() => {})
-      .catch(() => {})
+    rowsToInsert.push({
+      user_id: userId,
+      plan_date: dateStr,
+      tasks,
+      generated_at: new Date().toISOString(),
+    })
+  }
+
+  if (rowsToInsert.length > 0) {
+    const { error } = await service.from('study_plan').insert(rowsToInsert)
+    if (error) console.error('[scheduler] generateUpcomingPreview insert failed', error)
   }
 }
