@@ -132,7 +132,9 @@ export async function POST(request: Request) {
   }
 
   // Fire-and-forget: rerun scheduler so today's plan reflects the new material
-  runScheduler(user.id).catch(() => {})
+  runScheduler(user.id).catch(e =>
+    console.error('[inbox/upload] runScheduler failed', e)
+  )
 
   return NextResponse.json({ ok: true, inbox_item_id: inboxItem.inbox_item_id, ...result })
 }

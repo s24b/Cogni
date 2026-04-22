@@ -26,7 +26,13 @@ export async function createClient() {
   )
 }
 
-// Service role client for server-side agent operations (bypasses RLS)
+// Service role client for server-side agent operations (bypasses RLS).
+// Uses require() so the client is typed as any, which matches how the rest of
+// the codebase treats Supabase join results (untyped, shape-cast at the call
+// site). Switching to the typed ESM import would propagate generic inference
+// through every agent file. Safe to revisit once the join-cast patterns are
+// replaced with generated database types.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 export function createServiceClient() {
   const { createClient } = require('@supabase/supabase-js')
   return createClient(

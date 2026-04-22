@@ -104,7 +104,6 @@ export default async function ProgressPage() {
     })
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function getAvgMasteryAtDate(topicIds: string[], targetDate: string): number | null {
     const scores: number[] = []
     for (const tid of topicIds) {

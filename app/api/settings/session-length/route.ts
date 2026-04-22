@@ -16,7 +16,9 @@ export async function PATCH(request: Request) {
   await service.from('users').update({ session_length_preference: sessionLength }).eq('user_id', user.id)
 
   // Rerun scheduler so daily plan uses the updated session length
-  runScheduler(user.id).catch(() => {})
+  runScheduler(user.id).catch(e =>
+    console.error('[settings/session-length] runScheduler failed', e)
+  )
 
   return NextResponse.json({ ok: true })
 }

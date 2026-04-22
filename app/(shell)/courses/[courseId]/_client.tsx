@@ -30,7 +30,7 @@ import {
 } from '@phosphor-icons/react'
 import { useCallback } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { StaggerList, StaggerItem, ease } from '@/components/ui/motion'
+import { StaggerList, StaggerItem } from '@/components/ui/motion'
 import { resolveIcon, resolveColor } from '@/lib/course-icons'
 import { QuizSession } from '@/components/quiz/QuizSession'
 

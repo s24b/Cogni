@@ -68,9 +68,8 @@ export async function buildTutorSystemPrompt(
 ): Promise<string> {
   const service = createServiceClient()
 
-  const [learningProfile, weakAreas, professorWiki] = await Promise.all([
+  const [learningProfile, professorWiki] = await Promise.all([
     readWikiFile(userId, 'learning_profile.md'),
-    readWikiFile(userId, 'weak_areas.md'),
     opts?.professorId ? readWikiFile(userId, `professor_${opts.professorId}.md`) : Promise.resolve(null),
   ])
 

@@ -36,7 +36,6 @@ export default async function MaterialsPage({ params }: { params: Promise<{ cour
 
   return (
     <MaterialsClient
-      courseId={courseId}
       courseName={c.name}
       professorName={profName}
       materials={materialsResult.data ?? []}

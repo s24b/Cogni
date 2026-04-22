@@ -40,13 +40,11 @@ function labelFor(filename: string, professorMap: ProfessorMap): string {
 }
 
 function DeleteWarning({
-  filename,
   label,
   severity,
   onConfirm,
   onCancel,
 }: {
-  filename: string
   label: string
   severity: 'high' | 'medium' | 'low'
   onConfirm: () => void
@@ -99,12 +97,10 @@ function DeleteWarning({
 function WikiFileRow({
   file,
   label,
-  professorMap,
   onSaved,
 }: {
   file: WikiFile
   label: string
-  professorMap: ProfessorMap
   onSaved: () => void
 }) {
   const [expanded, setExpanded] = useState(false)
@@ -217,7 +213,6 @@ function WikiFileRow({
 
       {confirmDelete && (
         <DeleteWarning
-          filename={file.filename}
           label={label}
           severity={severity}
           onConfirm={handleDelete}
@@ -268,7 +263,6 @@ export function KnowledgeStore({
               key={f.filename}
               file={f}
               label={labelFor(f.filename, professorMap)}
-              professorMap={professorMap}
               onSaved={() => router.refresh()}
             />
           ))}
@@ -283,7 +277,6 @@ export function KnowledgeStore({
               key={f.filename}
               file={f}
               label={labelFor(f.filename, professorMap)}
-              professorMap={professorMap}
               onSaved={() => router.refresh()}
             />
           ))}

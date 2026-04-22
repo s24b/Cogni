@@ -81,7 +81,9 @@ export async function POST(request: Request) {
   const courseId = courseRow.course_id
 
   // Await icon assignment so it's committed before the client refreshes
-  await assignCourseIcon(user.id, courseId, name).catch(() => {})
+  await assignCourseIcon(user.id, courseId, name).catch(e =>
+    console.error('[courses/create] assignCourseIcon failed', e)
+  )
 
   if (syllabus && syllabus.size > 0) {
     const ext = syllabus.name.split('.').pop()?.toLowerCase() ?? ''

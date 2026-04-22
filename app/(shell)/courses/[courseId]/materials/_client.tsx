@@ -102,12 +102,10 @@ function MaterialRow({ material, onDeleted }: { material: Material; onDeleted: (
 }
 
 export function MaterialsClient({
-  courseId,
   courseName,
   professorName,
   materials: initialMaterials,
 }: {
-  courseId: string
   courseName: string
   professorName: string | null
   materials: Material[]

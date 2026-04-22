@@ -38,7 +38,6 @@ export function scheduleReview(
   const now = new Date()
   const scheduling = f.repeat(card, now)
   // scheduling keys are '1'|'2'|'3'|'4' matching Rating enum values
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const next = (scheduling as unknown as Record<string, { card: Card }>)[String(rating)].card
 
   return dbFromCard(next)

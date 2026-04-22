@@ -384,7 +384,7 @@ function ConfigForm({
                   }`}
                 >
                   <span className="text-sm font-medium text-foreground">Check after each question</span>
-                  <span className="text-xs text-muted-foreground">See if you're right immediately, with explanation</span>
+                  <span className="text-xs text-muted-foreground">See if you&apos;re right immediately, with explanation</span>
                 </button>
                 <button
                   onClick={() => setCheckTiming('at_end')}
@@ -778,7 +778,9 @@ export function QuizSession({ courseId, courseName, topicOptions, initialQuestio
     }
   }, [courseId, examMode, configState.topicFilters, startTime, onComplete])
 
-  onExpireRef.current = () => submitAnswers(userAnswers, questions)
+  useEffect(() => {
+    onExpireRef.current = () => submitAnswers(userAnswers, questions)
+  }, [submitAnswers, userAnswers, questions])
 
   async function handleStart(cfg: ConfigState) {
     setConfigState(cfg)

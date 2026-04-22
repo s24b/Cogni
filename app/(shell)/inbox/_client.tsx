@@ -297,11 +297,6 @@ export function InboxClient({ items: initialItems, courses }: { items: InboxItem
     setTimeout(() => setStaged(prev => prev.filter(s => s.id !== stagedId)), 1500)
   }
 
-  function skipDueDate(stagedId: string) {
-    updateItem(stagedId, { done: true, awaitingDueDate: false })
-    setTimeout(() => setStaged(prev => prev.filter(s => s.id !== stagedId)), 1500)
-  }
-
   async function retryItem(itemId: string) {
     setItems(prev => prev.map(i =>
       i.inbox_item_id === itemId ? { ...i, classification_status: 'pending' } : i

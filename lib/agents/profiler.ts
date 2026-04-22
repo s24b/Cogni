@@ -367,7 +367,6 @@ export async function runProfiler(
     .eq('course_id', courseId)
     .single()
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const professorId = courseRow?.professor_id as string | null
   const professorName = professorId
     ? (Array.isArray(courseRow?.professors)

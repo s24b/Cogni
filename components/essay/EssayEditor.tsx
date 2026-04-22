@@ -18,7 +18,6 @@ import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   TextB, TextItalic, TextUnderline, TextStrikethrough,
-  TextHOne, TextHTwo, TextHThree,
   ListBullets, ListNumbers,
   TextAlignLeft, TextAlignCenter, TextAlignRight, TextAlignJustify,
   Table as TableIcon,
@@ -1440,7 +1439,7 @@ export function EssayEditor({
           <TBtn
             title="Decrease indent"
             onClick={() => {
-              const { from, to } = editor.state.selection
+              const { from } = editor.state.selection
               const text = editor.state.doc.textBetween(from - 4, from)
               if (text === '    ') {
                 editor.chain().focus().deleteRange({ from: from - 4, to: from }).run()

@@ -8,18 +8,15 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
-import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from 'react-resizable-panels'
 import {
   PaperPlaneRight,
   Microphone,
-  BookOpen,
   ChatCircle,
   Chalkboard,
   Crosshair,
   CircleNotch,
   Plus,
   ArrowsOut,
-  ArrowsIn,
   Brain,
   Cards,
   Paperclip,
