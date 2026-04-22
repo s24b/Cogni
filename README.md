@@ -224,4 +224,4 @@ Vercel Cron Jobs do not run locally. The scheduler runs automatically when you n
 
 ## ⚠️ Active Project
 
-Cogni is an active personal project. Some features may have rough edges — contributions and bug reports are welcome.
+Cogni is an active personal project. Most features work as described, but some may have rough edges or occasional bugs — contributions and bug reports are welcome.
