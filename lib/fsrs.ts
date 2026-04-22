@@ -40,16 +40,27 @@ export function scheduleReview(
   // scheduling keys are '1'|'2'|'3'|'4' matching Rating enum values
   const next = (scheduling as unknown as Record<string, { card: Card }>)[String(rating)].card
 
-  return dbFromCard(next)
+  return dbFromCard(next, { clampToTomorrow: true })
 }
 
-function dbFromCard(card: Card) {
+function dbFromCard(card: Card, opts: { clampToTomorrow?: boolean } = {}) {
   const stateLabel = ['new', 'learning', 'review', 'relearning'][card.state] ?? 'new'
+  // fsrs_next_review_date is a date column, but ts-fsrs schedules learning-phase
+  // cards in minutes (e.g. "Good" on a new card → +10 min, still today). Without
+  // clamping, the card would round to today and reappear in the same session.
+  // Cogni is one-session-per-day, so once rated the card moves to tomorrow at soonest.
+  const todayStr = new Date().toISOString().split('T')[0]
+  let dueStr = card.due.toISOString().split('T')[0]
+  if (opts.clampToTomorrow && dueStr <= todayStr) {
+    const tomorrow = new Date()
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    dueStr = tomorrow.toISOString().split('T')[0]
+  }
   return {
     fsrs_stability: card.stability,
     fsrs_difficulty: card.difficulty,
     fsrs_last_review: card.last_review?.toISOString() ?? null,
-    fsrs_next_review_date: card.due.toISOString().split('T')[0],
+    fsrs_next_review_date: dueStr,
     fsrs_reps: card.reps,
     fsrs_lapses: card.lapses,
     fsrs_state: stateLabel,

@@ -87,6 +87,31 @@ export default async function TodayPage() {
     })
   }
 
+  // Enrich flashcard_review tasks with their live due-card counts. The stored plan
+  // freezes card_count at generation time, so after a review session the page would
+  // otherwise keep showing the old "N cards due" number and the task wouldn't reflect
+  // progress on refresh.
+  type FcTask = Extract<TaskItem, { type: 'flashcard_review' }>
+  const fcCourseIds = tasks
+    .filter((t): t is FcTask => t.type === 'flashcard_review')
+    .map(t => t.course_id)
+  if (fcCourseIds.length > 0) {
+    const { data: liveDue } = await service
+      .from('flashcards')
+      .select('course_id')
+      .eq('user_id', user.id)
+      .in('course_id', fcCourseIds)
+      .lte('fsrs_next_review_date', today)
+    const liveCountByCourse = new Map<string, number>()
+    for (const row of (liveDue ?? []) as { course_id: string }[]) {
+      liveCountByCourse.set(row.course_id, (liveCountByCourse.get(row.course_id) ?? 0) + 1)
+    }
+    tasks = tasks.map((t): TaskItem => {
+      if (t.type !== 'flashcard_review') return t
+      return { ...t, card_count: liveCountByCourse.get(t.course_id) ?? 0 }
+    })
+  }
+
   // Fire-and-forget: generate upcoming 6-day preview (skips days already cached)
   generateUpcomingPreview(user.id).catch(() => {})
 
