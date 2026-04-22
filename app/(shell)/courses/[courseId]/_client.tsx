@@ -29,6 +29,8 @@ import {
   DownloadSimple,
   Globe,
   CheckCircle,
+  Exam,
+  PencilSimple,
 } from '@phosphor-icons/react'
 import { useCallback } from 'react'
 import { useDropzone } from 'react-dropzone'
@@ -75,6 +77,14 @@ type Material = {
   filename: string | null
   processing_status: string
   uploaded_at: string
+}
+
+type CourseExam = {
+  exam_id: string
+  date: string
+  grade_weight: number | null
+  duration_minutes: number | null
+  student_score: number | null
 }
 
 const TIER_LABELS: Record<number, string> = {
@@ -132,6 +142,8 @@ function DualBar({ mastery, coverage }: { mastery: number | null; coverage: numb
 function TopicRow({ topic, courseId, onRefresh }: { topic: Topic; courseId: string; onRefresh: () => void }) {
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [confirming, setConfirming] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   async function handleGenerate() {
     setGenerating(true)
@@ -150,6 +162,12 @@ function TopicRow({ topic, courseId, onRefresh }: { topic: Topic; courseId: stri
     } finally {
       setGenerating(false)
     }
+  }
+
+  async function handleDelete() {
+    setDeleting(true)
+    await fetch(`/api/topics/${topic.topic_id}`, { method: 'DELETE' })
+    onRefresh()
   }
 
   return (
@@ -186,9 +204,36 @@ function TopicRow({ topic, courseId, onRefresh }: { topic: Topic; courseId: stri
             {generating ? 'Generating…' : 'Generate cards'}
           </button>
         )}
+        <button
+          onClick={() => setConfirming(v => !v)}
+          aria-label="Delete topic"
+          className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors shrink-0"
+        >
+          <Trash size={12} />
+        </button>
       </div>
       <DualBar mastery={topic.mastery_score} coverage={topic.content_coverage} />
       {error && <span className="text-[11px] text-red-500">{error}</span>}
+      {confirming && (
+        <div className="flex items-center justify-between rounded-lg bg-destructive/5 border border-destructive/20 px-3 py-2">
+          <span className="text-xs text-destructive">Delete topic and its flashcards?</span>
+          <div className="flex items-center gap-2 ml-3 shrink-0">
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="rounded-md bg-destructive px-2.5 py-1 text-[11px] font-semibold text-destructive-foreground hover:bg-destructive/90 disabled:opacity-40 transition-colors"
+            >
+              {deleting ? 'Deleting…' : 'Delete'}
+            </button>
+            <button
+              onClick={() => setConfirming(false)}
+              className="rounded-md border border-border px-2.5 py-1 text-[11px] text-muted-foreground hover:bg-muted/50 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -766,6 +811,111 @@ function MaterialsSection({
   )
 }
 
+function ExamRow({ exam, courseId }: { exam: CourseExam; courseId: string }) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(exam.student_score != null ? String(exam.student_score) : '')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  const date = new Date(exam.date + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+
+  async function handleSave() {
+    const score = value.trim() === '' ? null : Number(value)
+    if (score !== null && (isNaN(score) || score < 0 || score > 100)) return
+    setSaving(true)
+    const res = await fetch(`/api/courses/${courseId}/exams/${exam.exam_id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ student_score: score }),
+    })
+    setSaving(false)
+    if (res.ok) {
+      setSaved(true)
+      setEditing(false)
+      setTimeout(() => setSaved(false), 2000)
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-purple-500/10">
+        <Exam size={15} className="text-purple-500" weight="fill" />
+      </div>
+      <div className="flex flex-1 flex-col gap-0.5 min-w-0">
+        <span className="text-sm font-medium text-foreground">{date}</span>
+        <span className="text-xs text-muted-foreground">
+          {exam.grade_weight != null ? `${exam.grade_weight}% of grade` : 'Grade weight unknown'}
+          {exam.duration_minutes ? ` · ${exam.duration_minutes} min` : ''}
+        </span>
+      </div>
+      {editing ? (
+        <div className="flex items-center gap-2 shrink-0">
+          <input
+            type="number"
+            min={0}
+            max={100}
+            value={value}
+            onChange={e => setValue(e.target.value)}
+            placeholder="0–100"
+            className="w-16 rounded-lg border border-border bg-background px-2 py-1 text-xs text-foreground text-center focus:outline-none focus:ring-2 focus:ring-primary/50"
+            onKeyDown={e => { if (e.key === 'Enter') handleSave() }}
+            autoFocus
+          />
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex size-6 items-center justify-center rounded-md bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-40 transition-colors"
+          >
+            {saving ? <CircleNotch size={11} className="animate-spin" /> : <Check size={11} weight="bold" />}
+          </button>
+          <button
+            onClick={() => { setEditing(false); setValue(exam.student_score != null ? String(exam.student_score) : '') }}
+            className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/50 transition-colors"
+          >
+            <X size={11} />
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 shrink-0">
+          {exam.student_score != null ? (
+            <span className={`font-heading text-base font-bold tabular-nums ${exam.student_score >= 70 ? 'text-emerald-600 dark:text-emerald-400' : exam.student_score >= 50 ? 'text-amber-500' : 'text-red-500'}`}>
+              {exam.student_score}%
+            </span>
+          ) : saved ? (
+            <span className="text-xs text-emerald-600 dark:text-emerald-400">Saved</span>
+          ) : (
+            <span className="text-xs text-muted-foreground">No score</span>
+          )}
+          <button
+            onClick={() => setEditing(true)}
+            aria-label="Enter exam score"
+            className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
+          >
+            <PencilSimple size={11} />
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ExamsSection({ exams, courseId }: { exams: CourseExam[]; courseId: string }) {
+  if (exams.length === 0) return null
+  return (
+    <div className="flex flex-col gap-3">
+      <h2 className="text-sm font-semibold text-foreground">Exams</h2>
+      <div className="flex flex-col gap-2">
+        {exams.map(exam => (
+          <ExamRow key={exam.exam_id} exam={exam} courseId={courseId} />
+        ))}
+      </div>
+      <p className="text-[11px] text-muted-foreground">
+        Enter your actual exam scores to activate grade prediction on the Progress tab.
+      </p>
+    </div>
+  )
+}
+
 type WebSuggestion = { id: string; title: string | null; url: string | null; content: string }
 
 function WebSuggestionBanner({ courseId, onAdded }: { courseId: string; onAdded: () => void }) {
@@ -901,12 +1051,14 @@ export function CourseDetailClient({
   course,
   testResults,
   materials,
+  exams,
   professorWiki,
   hasOpenAI,
 }: {
   course: Course
   testResults: TestResult[]
   materials: Material[]
+  exams: CourseExam[]
   professorWiki: string | null
   hasOpenAI: boolean
 }) {
@@ -1078,6 +1230,9 @@ export function CourseDetailClient({
                 </StaggerList>
               )}
             </div>
+
+            {/* Exams */}
+            <ExamsSection exams={exams} courseId={course.course_id} />
 
             {/* Materials */}
             {materials.length > 0 && (

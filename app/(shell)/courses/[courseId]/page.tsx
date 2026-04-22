@@ -14,7 +14,7 @@ export default async function CourseDetailPage({ params }: { params: Promise<{ c
   const service = createServiceClient()
   const today = new Date().toISOString().split('T')[0]
 
-  const [courseResult, resultsResult, materialsResult, openaiKey] = await Promise.all([
+  const [courseResult, resultsResult, materialsResult, examsResult, openaiKey] = await Promise.all([
     service
       .from('courses')
       .select(`
@@ -52,6 +52,12 @@ export default async function CourseDetailPage({ params }: { params: Promise<{ c
       .eq('user_id', user.id)
       .order('tier', { ascending: true })
       .order('uploaded_at', { ascending: false }),
+    service
+      .from('exams')
+      .select('exam_id, date, grade_weight, duration_minutes, student_score')
+      .eq('course_id', courseId)
+      .eq('user_id', user.id)
+      .order('date', { ascending: true }),
     getUserKey(user.id, 'openai_key'),
   ])
 
@@ -105,6 +111,7 @@ export default async function CourseDetailPage({ params }: { params: Promise<{ c
       course={course}
       testResults={resultsResult.data ?? []}
       materials={materialsResult.data ?? []}
+      exams={examsResult.data ?? []}
       professorWiki={professorWiki}
       hasOpenAI={!!openaiKey}
     />
