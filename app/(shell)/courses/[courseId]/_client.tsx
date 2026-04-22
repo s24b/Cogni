@@ -813,9 +813,9 @@ function MaterialsSection({
 
 function ExamRow({ exam, courseId }: { exam: CourseExam; courseId: string }) {
   const [editing, setEditing] = useState(false)
+  const [currentScore, setCurrentScore] = useState<number | null>(exam.student_score)
   const [value, setValue] = useState(exam.student_score != null ? String(exam.student_score) : '')
   const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
 
   const date = new Date(exam.date + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 
@@ -830,10 +830,14 @@ function ExamRow({ exam, courseId }: { exam: CourseExam; courseId: string }) {
     })
     setSaving(false)
     if (res.ok) {
-      setSaved(true)
+      setCurrentScore(score)
       setEditing(false)
-      setTimeout(() => setSaved(false), 2000)
     }
+  }
+
+  function handleCancel() {
+    setEditing(false)
+    setValue(currentScore != null ? String(currentScore) : '')
   }
 
   return (
@@ -869,7 +873,7 @@ function ExamRow({ exam, courseId }: { exam: CourseExam; courseId: string }) {
             {saving ? <CircleNotch size={11} className="animate-spin" /> : <Check size={11} weight="bold" />}
           </button>
           <button
-            onClick={() => { setEditing(false); setValue(exam.student_score != null ? String(exam.student_score) : '') }}
+            onClick={handleCancel}
             className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/50 transition-colors"
           >
             <X size={11} />
@@ -877,12 +881,10 @@ function ExamRow({ exam, courseId }: { exam: CourseExam; courseId: string }) {
         </div>
       ) : (
         <div className="flex items-center gap-2 shrink-0">
-          {exam.student_score != null ? (
-            <span className={`font-heading text-base font-bold tabular-nums ${exam.student_score >= 70 ? 'text-emerald-600 dark:text-emerald-400' : exam.student_score >= 50 ? 'text-amber-500' : 'text-red-500'}`}>
-              {exam.student_score}%
+          {currentScore != null ? (
+            <span className={`font-heading text-base font-bold tabular-nums ${currentScore >= 70 ? 'text-emerald-600 dark:text-emerald-400' : currentScore >= 50 ? 'text-amber-500' : 'text-red-500'}`}>
+              {currentScore}%
             </span>
-          ) : saved ? (
-            <span className="text-xs text-emerald-600 dark:text-emerald-400">Saved</span>
           ) : (
             <span className="text-xs text-muted-foreground">No score</span>
           )}

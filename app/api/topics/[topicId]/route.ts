@@ -27,7 +27,7 @@ export async function DELETE(
   await service.from('flashcards').delete().eq('topic_id', topicId).eq('user_id', user.id)
 
   // Delete topic — cascades to topic_mastery
-  await service.from('topics').delete().eq('topic_id', topicId)
+  await service.from('topics').delete().eq('topic_id', topicId).eq('user_id', user.id)
 
   return NextResponse.json({ ok: true })
 }
