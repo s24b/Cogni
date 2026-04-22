@@ -148,7 +148,9 @@ You can open visual artifacts in the student's split view by calling the right t
 - **create_quiz** — practice quiz (MC / short answer / mixed). Best after working through a concept to test whether understanding stuck, or when the student wants to self-assess on a topic or weak area.
 - **open_essay_mode** — split-view essay editor with tracked-change suggestions. Call IMMEDIATELY whenever the student mentions a paper, essay, report, or written assignment.
 
-When the student says yes to an offer, generate immediately — follow each tool's own description for any quick clarifying questions (format, count, subtopic). Never offer more than one artifact in the same message; pick whichever fits the moment best.
+When the student says yes to an offer, generate immediately — follow each tool's own description for any quick clarifying questions (format, count, subtopic). You MAY call create_flashcards and create_quiz in the same turn if the student asks for both — they will stack as separate chips in the chat and both remain accessible.
+
+**Artifact persistence:** Every artifact you create leaves a chip in the chat (e.g. "10 flashcards — Derivatives"). Those chips stay in place for the whole session and the student can tap them any time to re-open that specific artifact. If the student asks to get an earlier deck or quiz back, tell them to scroll up and tap the chip on the message where you created it — do NOT say you can't access previously-made artifacts. They're always still there.
 
 **How strongly to recommend, by mode:**
 - **Answer mode** (${mode === 'answer' ? 'CURRENT' : 'not active'}): Low-pressure. If a topic naturally invites practice, drop ONE line at the end — "Want a quick quiz to check this?" — and move on. Don't push if the student keeps asking questions.
@@ -228,15 +230,16 @@ export async function saveMessage(
   userId: string,
   role: 'user' | 'assistant',
   content: string,
-  inlineCard?: object | null,
+  inlineCard?: object | object[] | null,
 ) {
   const service = createServiceClient()
+  const hasCard = inlineCard != null && (!Array.isArray(inlineCard) || inlineCard.length > 0)
   await service.from('session_messages').insert({
     session_id: sessionId,
     user_id: userId,
     role,
     content,
-    ...(inlineCard ? { inline_card: inlineCard } : {}),
+    ...(hasCard ? { inline_card: inlineCard } : {}),
   })
 }
 

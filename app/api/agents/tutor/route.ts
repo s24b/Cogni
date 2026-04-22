@@ -148,7 +148,7 @@ export async function POST(request: Request) {
     { type: 'web_search_20250305', name: 'web_search' },
     {
       name: 'create_flashcards',
-      description: 'Create and save a set of flashcards for the student. Before calling, ask ONE brief question about which specific subtopic or aspect to focus on, unless the student already specified — e.g. "Any particular aspect — power rule, chain rule, trig? Or all derivatives?" Then generate based on their answer.',
+      description: 'Create and save a set of flashcards for the student. Before calling, ask ONE brief question about which specific subtopic or aspect to focus on, unless the student already specified — e.g. "Any particular aspect — power rule, chain rule, trig? Or all derivatives?" Then generate based on their answer. Wrap every math expression in LaTeX delimiters so it renders correctly: inline math uses single dollar signs like $f(x) = x^2$, block/display math uses double dollar signs like $$\\int_0^1 x\\,dx$$. Never write raw math like "x^2" or "integral from 0 to 1" — always LaTeX-delimit it. This applies to both front and back of every card.',
       input_schema: {
         type: 'object' as const,
         properties: {
@@ -172,7 +172,7 @@ export async function POST(request: Request) {
     },
     {
       name: 'create_quiz',
-      description: 'Create a practice quiz for the student. Before calling, ask ONE brief question: what format (MC / short answer / mix) and how many questions? Give a recommendation based on what the student was just working on — e.g. "I\'d suggest 10 mixed questions on derivatives. MC, short answer, or mixed? And how many?" Then generate immediately once they answer.',
+      description: 'Create a practice quiz for the student. Before calling, ask ONE brief question: what format (MC / short answer / mix) and how many questions? Give a recommendation based on what the student was just working on — e.g. "I\'d suggest 10 mixed questions on derivatives. MC, short answer, or mixed? And how many?" Then generate immediately once they answer. Wrap every math expression in LaTeX delimiters so it renders correctly: inline math uses single dollar signs like $f(x) = x^2$, block/display math uses double dollar signs like $$\\int_0^1 x\\,dx$$. Never write raw math like "x^2" or "f\'(x)" — always LaTeX-delimit it. This applies to every field: question, options, answer, and explanation.',
       input_schema: {
         type: 'object' as const,
         properties: {
@@ -263,7 +263,7 @@ export async function POST(request: Request) {
         ]
 
         let fullText = ''
-        let serverInlineCard: object | null = null
+        const serverInlineCards: object[] = []
         let iterations = 0
 
         while (iterations < 5) {
@@ -346,7 +346,7 @@ export async function POST(request: Request) {
               if (block.name === 'open_essay_mode') {
                 const input = block.input as { topic: string }
                 controller.enqueue(emit({ t: 'essay_open', topic: input.topic }))
-                serverInlineCard = { type: 'essay', topic: input.topic, count: 0 }
+                serverInlineCards.push({ type: 'essay', topic: input.topic, count: 0 })
                 toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: 'Essay mode opened. Tell the student the writing space is ready.' })
               } else if (block.name === 'suggest_edit') {
                 const input = block.input as { target: string; replacement: string; instruction: string }
@@ -394,14 +394,14 @@ export async function POST(request: Request) {
                 } catch { /* non-critical */ }
 
                 controller.enqueue(emit({ t: 'card', kind: 'flashcards', topic: input.topic, count: savedData.length, data: savedData }))
-                serverInlineCard = { type: 'flashcards', topic: input.topic, count: savedData.length, data: savedData }
+                serverInlineCards.push({ type: 'flashcards', topic: input.topic, count: savedData.length, data: savedData })
 
                 const cardList = input.cards.map((c, i) => `${i + 1}. Front: ${c.front} | Back: ${c.back}`).join('\n')
                 toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: `Created ${input.cards.length} flashcards on "${input.topic}" and saved them to the student's deck. Tell the student they're ready and have been added to spaced repetition.\n\nCards you created:\n${cardList}` })
               } else if (block.name === 'create_quiz') {
                 const input = block.input as { topic: string; topic_id: string; questions: object[] }
                 controller.enqueue(emit({ t: 'card', kind: 'quiz', topic: input.topic, count: input.questions.length, data: input.questions }))
-                serverInlineCard = { type: 'quiz', topic: input.topic, count: input.questions.length, data: input.questions }
+                serverInlineCards.push({ type: 'quiz', topic: input.topic, count: input.questions.length, data: input.questions })
                 const questionList = (input.questions as Array<{ question: string; answer: string; explanation: string }>)
                   .map((q, i) => `${i + 1}. ${q.question}\n   Answer: ${q.answer}\n   Explanation: ${q.explanation}`)
                   .join('\n\n')
@@ -461,7 +461,7 @@ export async function POST(request: Request) {
         }
 
         controller.close()
-        await saveMessage(sessionId, user.id, 'assistant', fullText, serverInlineCard)
+        await saveMessage(sessionId, user.id, 'assistant', fullText, serverInlineCards.length > 0 ? serverInlineCards : null)
 
         const isFirstExchange = priorMessages.length === 0
         if (isFirstExchange) {

@@ -55,7 +55,7 @@ type Message = {
   role: 'user' | 'assistant' | 'system'
   content: string
   streaming?: boolean
-  inlineCard?: InlineCard
+  inlineCards?: InlineCard[]
   segments?: ChatSegment[]
   grade?: GradeResult
   attachments?: LocalAttachment[]
@@ -811,23 +811,29 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
       const res = await fetch(`/api/agents/tutor?sessionId=${session.session_id}`)
       if (res.ok) {
         const { messages: stored } = await res.json() as {
-          messages: { role: string; content: string; inline_card?: InlineCard | null }[]
+          messages: { role: string; content: string; inline_card?: InlineCard | InlineCard[] | null }[]
         }
         const restored = stored.map(m => {
           const base: Message = { role: m.role as Message['role'], content: m.content }
           if (m.inline_card) {
-            base.inlineCard = m.inline_card
-            // Re-open essay mode if the last essay card is restored
-            if (m.inline_card.type === 'essay' && m === stored[stored.length - 1]) {
-              setEssay({ open: true, topic: m.inline_card.topic })
+            const cards = Array.isArray(m.inline_card) ? m.inline_card : [m.inline_card]
+            base.inlineCards = cards
+            // Re-open essay mode if the last message has an essay card
+            if (m === stored[stored.length - 1]) {
+              const essayCard = cards.find(c => c.type === 'essay')
+              if (essayCard) setEssay({ open: true, topic: essayCard.topic })
             }
           }
           return base
         })
         setMessages(restored)
-        // Restore the last artifact in the split panel if present
-        const lastCard = restored.slice().reverse().find(m => m.inlineCard)?.inlineCard
-        if (lastCard && lastCard.type !== 'essay') setSplitContent(lastCard)
+        // Restore the last non-essay artifact in the split panel if present
+        const lastCard = restored
+          .slice()
+          .reverse()
+          .flatMap(m => (m.inlineCards ?? []).slice().reverse())
+          .find(c => c.type !== 'essay')
+        if (lastCard) setSplitContent(lastCard)
       }
     } catch {
       // non-critical — leave messages empty
@@ -894,7 +900,7 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
       let lineBuffer = ''
       let accumulated = ''
       const segments: ChatSegment[] = []
-      let cardPayload: InlineCard | undefined
+      const cardPayloads: InlineCard[] = []
       let gradeResult: GradeResult | undefined
       let errored = false
 
@@ -972,31 +978,34 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
                 })
                 syncSegments()
               } else if (event.t === 'card' && event.kind) {
-                cardPayload = {
+                const newCard: InlineCard = {
                   type: event.kind,
                   count: event.count ?? 0,
                   topic: event.topic ?? '',
                   data: event.data,
                 }
+                cardPayloads.push(newCard)
+                const snapshot = [...cardPayloads]
                 setMessages(prev => {
                   const updated = [...prev]
                   updated[updated.length - 1] = {
                     ...updated[updated.length - 1],
-                    inlineCard: cardPayload,
+                    inlineCards: snapshot,
                   }
                   return updated
                 })
-                setSplitContent(cardPayload)
+                setSplitContent(newCard)
               } else if (event.t === 'essay_open' && event.topic) {
                 const topic = event.topic
                 setEssay({ open: true, topic })
                 setChatPct(25)
-                cardPayload = { type: 'essay', topic, count: 0 }
+                cardPayloads.push({ type: 'essay', topic, count: 0 })
+                const snapshot = [...cardPayloads]
                 setMessages(prev => {
                   const updated = [...prev]
                   updated[updated.length - 1] = {
                     ...updated[updated.length - 1],
-                    inlineCard: cardPayload,
+                    inlineCards: snapshot,
                   }
                   return updated
                 })
@@ -1047,7 +1056,7 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
             role: 'assistant',
             content: accumulated,
             segments: segments.length > 0 ? segments.map(s => ({ ...s })) : undefined,
-            inlineCard: cardPayload,
+            inlineCards: cardPayloads.length > 0 ? cardPayloads : undefined,
             grade: gradeResult,
           }
           return updated
@@ -1079,7 +1088,16 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
       : summary.missedTopics.length > 0
       ? ` I struggled most with: ${summary.missedTopics.map(t => `${t.topic} (${t.wrongCount} wrong)`).join(', ')}.`
       : ''
-    const text = `I just finished the quiz on ${topic}. I got ${summary.correctCount} out of ${total} correct (${Math.round(summary.scorePct)}%).${missedParts} Can you review my results and help me understand what to work on?`
+    const breakdown = summary.results.length > 0
+      ? '\n\nQuestion-by-question:\n' + summary.results.map((r, i) => {
+          const q = r.question.question.replace(/\s+/g, ' ').trim()
+          const mark = r.correct ? '✓' : '✗'
+          const userLine = r.userAnswer ? `  My answer: ${r.userAnswer}` : '  My answer: (blank)'
+          const correctLine = r.correct ? '' : `\n  Correct: ${r.question.answer}`
+          return `${i + 1}. ${mark} ${q}\n${userLine}${correctLine}`
+        }).join('\n')
+      : ''
+    const text = `I just finished the quiz on ${topic}. I got ${summary.correctCount} out of ${total} correct (${Math.round(summary.scorePct)}%).${missedParts} Can you review my results and help me understand what to work on?${breakdown}`
     sendMessage(text)
   }
 
@@ -1353,19 +1371,21 @@ export function TutorClient({ courses, sessions: initialSessions, hasApiKey = tr
                         />
                       </div>
                     )}
-                    {msg.inlineCard && (
+                    {msg.inlineCards?.map((card, ci) => (
                       <InlineCardChip
-                        card={msg.inlineCard}
+                        key={ci}
+                        card={card}
                         onExpand={() => {
-                          if (msg.inlineCard?.type === 'essay') {
+                          if (card.type === 'essay') {
                             setEssay(prev => ({ ...prev, open: true }))
                             setChatPct(35)
                           } else {
+                            setSplitContent(card)
                             setSplitExpanded(true)
                           }
                         }}
                       />
-                    )}
+                    ))}
                     {msg.grade && (
                       <GradeBlock grade={msg.grade} />
                     )}

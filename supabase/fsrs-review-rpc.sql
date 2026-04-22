@@ -7,6 +7,14 @@
 -- explicit user_id check in the WHERE clause is what enforces the
 -- per-user boundary; do not remove it.
 
+-- Drop the old (buggy) signature if it exists. The first revision of this file
+-- declared p_fsrs_state as integer, but flashcards.fsrs_state is a text column
+-- with a CHECK ('new','learning','review','relearning'), and the route passes
+-- a string. The integer signature made every call fail 500.
+drop function if exists public.review_card_atomic(
+  uuid, uuid, numeric, numeric, integer, integer, integer, timestamptz, date, numeric
+);
+
 create or replace function public.review_card_atomic(
   p_card_id uuid,
   p_user_id uuid,
@@ -14,7 +22,7 @@ create or replace function public.review_card_atomic(
   p_fsrs_difficulty numeric,
   p_fsrs_reps integer,
   p_fsrs_lapses integer,
-  p_fsrs_state integer,
+  p_fsrs_state text,
   p_fsrs_last_review timestamptz,
   p_fsrs_next_review_date date,
   p_mastery_delta numeric
@@ -53,5 +61,5 @@ end;
 $$;
 
 grant execute on function public.review_card_atomic(
-  uuid, uuid, numeric, numeric, integer, integer, integer, timestamptz, date, numeric
+  uuid, uuid, numeric, numeric, integer, integer, text, timestamptz, date, numeric
 ) to authenticated, service_role;

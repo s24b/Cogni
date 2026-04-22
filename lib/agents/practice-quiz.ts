@@ -27,6 +27,7 @@ export type GradeSummary = {
   scorePct: number
   missedTopics: { topic: string; wrongCount: number }[]
   masteryUpdates: { topic_id: string; topicName: string; oldScore: number; newScore: number }[]
+  results: QuizResult[]
 }
 
 // ── Generate practice quiz questions (Haiku) ──────────────────────────────────
@@ -364,5 +365,5 @@ Return JSON only: {"score": 0.0-1.0, "correct": true/false, "feedback": "one sen
     duration_seconds: durationSeconds ?? null,
   })
 
-  return { correctCount, scorePct, missedTopics, masteryUpdates }
+  return { correctCount, scorePct, missedTopics, masteryUpdates, results }
 }

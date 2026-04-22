@@ -773,7 +773,7 @@ export function QuizSession({ courseId, courseName, topicOptions, initialQuestio
         fetch('/api/agents/scheduler/rerun', { method: 'POST' }).catch(() => {})
       }
     } catch {
-      setSummary({ correctCount: 0, scorePct: 0, missedTopics: [], masteryUpdates: [] })
+      setSummary({ correctCount: 0, scorePct: 0, missedTopics: [], masteryUpdates: [], results: [] })
       setPhase('results')
     }
   }, [courseId, examMode, configState.topicFilters, startTime, onComplete])

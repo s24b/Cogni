@@ -13,6 +13,7 @@ import {
   CheckCircle,
 } from '@phosphor-icons/react'
 import { ease } from '@/components/ui/motion'
+import { toast } from 'sonner'
 
 type Flashcard = { front: string; back: string; card_id?: string }
 
@@ -93,12 +94,20 @@ export function FlashcardViewer({ cards, topic, onClose, onComplete }: Props) {
     if (card.card_id) {
       setSubmitting(true)
       try {
-        await fetch('/api/cards/review', {
+        const res = await fetch('/api/cards/review', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ cardId: card.card_id, rating }),
         })
-      } catch { /* non-critical */ }
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}))
+          console.error('[flashcard-review] failed', res.status, body)
+          toast.error(`Review didn't save (${res.status}). Your FSRS scheduling may be stale.`)
+        }
+      } catch (e) {
+        console.error('[flashcard-review] network error', e)
+        toast.error("Couldn't reach server to save your review.")
+      }
       setSubmitting(false)
     }
     // Auto-advance after rating, or show done screen on last card
