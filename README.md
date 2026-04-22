@@ -11,7 +11,7 @@
 
 <br />
 
-Cogni decides what to study, when to study, and how — so you just show up. Upload your syllabi once. It extracts your topics, maps your professor's grading weights, tracks your mastery across every topic, and generates a prioritized study plan every morning. The tutor knows where you're weakest and routes there automatically. Flashcards are scheduled by FSRS at the card and topic level. Study blocks land in your Google Calendar. All you do is study. BYOK, self-hosted on Vercel + Supabase.
+Cogni decides what to study, when to study, and how — so you just show up. Feed it your syllabi, lecture notes, past exams, and course materials. It classifies and processes everything automatically, extracts your topics, maps your professor's grading weights, and generates a prioritized study plan every morning based on your current mastery and upcoming exams. The tutor pulls from your actual course materials. Flashcards are scheduled by FSRS at the card and topic level. Study blocks land in your Google Calendar. All you do is study. BYOK, self-hosted on Vercel + Supabase.
 
 <br />
 
