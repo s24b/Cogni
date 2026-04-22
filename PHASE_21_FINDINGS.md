@@ -37,3 +37,29 @@ Delete this file before merging `phase-21-audit` into `main`.
 
 ### Agent outputs all consumed
 Profiler → topics/exams/wiki (scheduler, tutor, practice-quiz). Flashcard → cards/content_coverage (review UI, simulated exam). Scheduler → study_plan (today). Nudge → nudges (today). Inbox → materials (RAG, flashcard agent). Tutor → messages, cards, quiz results (tutor UI).
+
+---
+
+## Session 3 — Bug sweep (commit pending)
+
+### Fixed
+- **Nudge cron had no auth and wrong method.** Route only exported `POST` while Vercel cron issues `GET` with `Authorization: Bearer $CRON_SECRET`. Net result: the nudge cron has never actually authenticated, and very likely never ran (405). Rewrote as `GET` with Bearer check, matching the scheduler cron's pattern.
+- **Calendar OAuth callback trusted `state` blindly.** `state` was the user_id with no session binding — an attacker with their own Google OAuth flow could forge a callback with `state=<victim_user_id>` and write their tokens onto the victim's row. Fixed by calling `auth.getUser()` in the callback and rejecting when `session.user.id !== stateUserId`.
+- **FSRS + topic_mastery non-atomicity (Session 2 finding).** Replaced the two separate writes in `/api/cards/review/route.ts` with a single `review_card_atomic(...)` Postgres function (new file `supabase/fsrs-review-rpc.sql`). The RPC updates both rows in one transaction, clamps mastery in SQL, and raises if the card isn't owned by the user. Callable path now surfaces any failure instead of silently swallowing it.
+
+### Verified unchanged (no bug)
+- **Auth boundary:** all other 40 API routes call `auth.getUser()` and return 401 before any data access. Dev routes gated on `NODE_ENV`.
+- **Tutor session lifecycle:** `getOrCreateSession` reuses today's open session; `autoNameSession` is fire-and-forget with internal try/catch (cannot produce unhandled rejection); `X-Session-Id` returned to client on first response.
+- **Streaming:** only the tutor route uses `ReadableStream`. Both success (line 463) and error (line 473) paths call `controller.close()`.
+- **Scheduler edge cases:** early returns on 0 courses (line 96), skips courses with 0 topics (line 133), early returns on 0 tasks (line 312), uses `upsert({onConflict:'user_id,plan_date'})` to prevent double-writes, calendar write is fire-and-forget with `.catch` logging.
+- **Calendar writes non-blocking:** `writeStudyBlocksToCalendar(...).catch(e => console.error(...))` — never blocks the scheduler.
+- **RLS coverage:** 20 user-scoped tables across `schema.sql` and patch files — every one has `enable row level security` and an `auth.uid() = user_id` policy. Includes `user_keys`, `calendar_connections`, `practice_test_results`, `course_files`.
+
+### Noted but not fixed (out-of-scope / trivial)
+- **Onboarding refresh-during-submit edge case:** `page.tsx` redirects to `/today` if the `users` row already exists, so the only duplication risk is during a partial-failure retry where `users` insert never happened. In that case the retry is the correct path. No fix.
+- **`appendToLog` race on log.md:** read-modify-write pattern; concurrent writes can drop log entries. Not corruption — just informational data loss. Low severity, no fix.
+- **Inbox `runFlashcardAgent(...).catch(() => {})`:** silent catch is intentional fire-and-forget after classification. UI-level error surfacing would require new UX; deferred.
+
+### Operations required before / during next deploy
+1. Run `supabase/fsrs-review-rpc.sql` in the Supabase SQL editor.
+2. Confirm `CRON_SECRET` env var is set in Vercel. (If not set, nudge cron will fail 401 — intended; set the secret and re-deploy.)

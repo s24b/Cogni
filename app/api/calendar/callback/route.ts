@@ -1,13 +1,23 @@
-import { createServiceClient } from '@/lib/supabase/server'
+import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 import { NextRequest } from 'next/server'
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url)
   const code = url.searchParams.get('code')
-  const userId = url.searchParams.get('state')
+  const stateUserId = url.searchParams.get('state')
 
-  if (!code || !userId) {
+  if (!code || !stateUserId) {
+    return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/settings?calendar=error`)
+  }
+
+  // Verify the OAuth `state` matches the caller's authenticated session.
+  // Google redirects back into the user's browser with their Supabase cookie;
+  // if `state` doesn't match the session we reject — this prevents an attacker
+  // from forging a callback that links their Google account to someone else's user row.
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user || user.id !== stateUserId) {
     return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/settings?calendar=error`)
   }
 
@@ -32,7 +42,7 @@ export async function GET(request: NextRequest) {
 
   const service = createServiceClient()
   await service.from('calendar_connections').upsert({
-    user_id: userId,
+    user_id: user.id,
     provider: 'google',
     access_token: tokens.access_token,
     refresh_token: tokens.refresh_token ?? null,
@@ -41,7 +51,7 @@ export async function GET(request: NextRequest) {
   }, { onConflict: 'user_id,provider' })
 
   // Redirect back to onboarding if the user hasn't completed it yet (no users row)
-  const { data: userRow } = await service.from('users').select('user_id').eq('user_id', userId).maybeSingle()
+  const { data: userRow } = await service.from('users').select('user_id').eq('user_id', user.id).maybeSingle()
   const returnPath = userRow ? '/settings?calendar=connected' : '/onboarding?calendar=connected'
   return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}${returnPath}`)
 }

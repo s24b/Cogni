@@ -2,15 +2,12 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { runNudgeChecks } from '@/lib/agents/nudge'
 import { NextResponse } from 'next/server'
 
-// POST — cron job (runs at 06:00 UTC daily via vercel.json)
-// Iterates all users and runs nudge checks for each.
-export async function POST() {
-  const secret = process.env.CRON_SECRET
-  // In production set CRON_SECRET in env vars; in dev it's open.
-  if (secret) {
-    // Vercel cron requests don't carry a secret header by default,
-    // so we accept any call from the Vercel cron runtime here.
-    // If you add CRON_SECRET, wire it up via a custom header in vercel.json.
+// Vercel Cron Job handler — called daily at 06:00 UTC via vercel.json.
+// Vercel cron issues a GET with an Authorization header carrying CRON_SECRET.
+export async function GET(request: Request) {
+  const authHeader = request.headers.get('authorization')
+  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   const service = createServiceClient()

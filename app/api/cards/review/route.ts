@@ -36,34 +36,24 @@ export async function POST(request: Request) {
     fsrs_next_review_date: card.fsrs_next_review_date,
   }, rating)
 
-  const { error: updateError } = await service
-    .from('flashcards')
-    .update(next)
-    .eq('card_id', cardId)
+  // Rough mastery bump: Again=-0.1, Hard=+0.02, Good=+0.08, Easy=+0.12. Clamped 0..1 by the RPC.
+  const masteryDelta = rating === 1 ? -0.1 : rating === 2 ? 0.02 : rating === 3 ? 0.08 : 0.12
 
-  if (updateError) {
-    return NextResponse.json({ error: updateError.message }, { status: 500 })
-  }
+  const { error: rpcError } = await service.rpc('review_card_atomic', {
+    p_card_id: cardId,
+    p_user_id: user.id,
+    p_fsrs_stability: next.fsrs_stability,
+    p_fsrs_difficulty: next.fsrs_difficulty,
+    p_fsrs_reps: next.fsrs_reps,
+    p_fsrs_lapses: next.fsrs_lapses,
+    p_fsrs_state: next.fsrs_state,
+    p_fsrs_last_review: next.fsrs_last_review,
+    p_fsrs_next_review_date: next.fsrs_next_review_date,
+    p_mastery_delta: masteryDelta,
+  })
 
-  // Rough mastery bump: Again=-0.1, Hard=+0.02, Good=+0.08, Easy=+0.12. Clamped 0..1.
-  if (card.topic_id) {
-    const delta = rating === 1 ? -0.1 : rating === 2 ? 0.02 : rating === 3 ? 0.08 : 0.12
-
-    const { data: mastery } = await service
-      .from('topic_mastery')
-      .select('mastery_score')
-      .eq('user_id', user.id)
-      .eq('topic_id', card.topic_id)
-      .single()
-
-    const current = Number(mastery?.mastery_score ?? 0)
-    const newScore = Math.max(0, Math.min(1, current + delta))
-
-    await service
-      .from('topic_mastery')
-      .update({ mastery_score: newScore, last_updated: new Date().toISOString() })
-      .eq('user_id', user.id)
-      .eq('topic_id', card.topic_id)
+  if (rpcError) {
+    return NextResponse.json({ error: rpcError.message }, { status: 500 })
   }
 
   return NextResponse.json({ ok: true, nextDue: next.fsrs_next_review_date })
