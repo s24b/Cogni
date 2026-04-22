@@ -8,7 +8,7 @@ export function MotionMain({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
 
   return (
-    <AnimatePresence mode="wait" initial={false}>
+    <AnimatePresence initial={false}>
       <motion.div
         key={pathname}
         className="flex flex-1 flex-col min-h-0 overflow-hidden"

@@ -131,7 +131,7 @@ export function ReviewClient({ cards }: { cards: Card[] }) {
           </p>
         </div>
         <button
-          onClick={() => router.push('/today')}
+          onClick={() => { router.push('/today'); router.refresh() }}
           className="flex items-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground"
         >
           Back to Today
@@ -146,7 +146,7 @@ export function ReviewClient({ cards }: { cards: Card[] }) {
       {/* Header */}
       <div className="flex items-center gap-4 border-b border-border px-4 py-3">
         <button
-          onClick={() => router.back()}
+          onClick={() => { router.push('/today'); router.refresh() }}
           className="flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
         >
           <X size={18} />
