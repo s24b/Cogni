@@ -15,7 +15,7 @@ Cogni decides what to study, when to study, and how — so you just show up. Fee
 
 <br />
 
-## How it works
+## 🔄 How it works
 
 1. **Upload your course materials** — syllabi, lecture notes, past exams, anything you have. Claude classifies each file, extracts topics with professor weights, exam dates, and grade breakdowns. Your course is fully mapped in minutes.
 2. **Every morning at 5am UTC, a plan is generated** — the scheduler scores every topic by mastery deficit, professor weight, and exam proximity. It allocates your session time, orders your flashcard review, and writes study blocks to Google Calendar.
