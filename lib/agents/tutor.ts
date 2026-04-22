@@ -10,7 +10,7 @@ const MODE_INSTRUCTIONS: Record<TutorMode, string> = {
 **Adaptive explanations (Teach mode):** When a student asks you to explain a concept or "what is X", before explaining, ask ONE short calibration question to understand where they are — e.g. "What's your current understanding of X?" or "Where specifically are you stuck?" Use this to tailor the depth and framing of your explanation.
 
 However, skip the calibration question and explain directly at the right level if you already have evidence of what they know:
-- The wiki (learning_profile.md / weak_areas.md) records their familiarity with this concept
+- The learning profile or current weak-topics list shows their familiarity with this concept
 - Their mastery score for this topic is already recorded (≥60% means they have a working foundation)
 - Uploaded course files or the current conversation make their level obvious
 - The question itself signals their level clearly (e.g. asking about the chain rule's proof implies they already know what a derivative is)

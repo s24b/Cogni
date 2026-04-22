@@ -239,7 +239,7 @@ export async function POST(request: Request) {
       input_schema: {
         type: 'object' as const,
         properties: {
-          file: { type: 'string', enum: ['learning_profile.md', 'weak_areas.md'], description: 'Which wiki file to update' },
+          file: { type: 'string', enum: ['learning_profile.md'], description: 'Which wiki file to update' },
           insight: { type: 'string', description: 'The specific insight to append (1-2 sentences)' },
         },
         required: ['file', 'insight'],

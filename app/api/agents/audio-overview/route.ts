@@ -146,7 +146,7 @@ Format rules — follow exactly:
 - Alternate hosts frequently (every 2–4 sentences)
 - Each host turn is 1–3 sentences
 - Cover the most exam-important concepts from the material
-- Total length: approximately 2,500–3,500 words of dialogue
+- Total length: approximately 2,500–2,800 words of dialogue
 - Begin immediately with [Host A]: opening the show
 
 Course material:

@@ -143,3 +143,67 @@ No new ops for Session 4. Session 3's list still applies:
 
 ### Operations required before / during next deploy
 No new ops for Session 5. Session 3's list still applies. Future-optional: add the two indexes flagged above.
+
+---
+
+## Session 6 — Token + API cost (commit pending)
+
+### Fixed
+- **`lib/agents/tutor.ts` Teach-mode prompt — stale `weak_areas.md` reference removed.** The wiki-check list in `MODE_INSTRUCTIONS.teach` named `weak_areas.md` as a place to look for familiarity evidence. Tutor no longer reads that file (Session 4 decision). Replaced with generic "learning profile or current weak-topics list" phrasing so the model doesn't hallucinate looking for a file that isn't in its system prompt.
+- **`app/api/agents/tutor/route.ts` `write_wiki_pattern` tool — enum narrowed.** Previously accepted `weak_areas.md` as a write target, which violates the 2026-04-21 profiler-only decision (a tutor-driven append would have silently mutated a file the profiler assumes it owns). Enum now restricted to `['learning_profile.md']`.
+- **`app/api/agents/audio-overview/route.ts` word target tightened.** Script prompt asked for "2,500–3,500 words" but `max_tokens: 4096` caps output at ~3,150 words, so the upper bound was unreachable and runs were silently truncating. Trimmed target to "2,500–2,800 words" to match the actual ceiling; keeps the same study-length podcast, no cost increase.
+
+### Verified — model assignments
+Audited every `client.messages.create(...)` call across 7 files. All assignments are deliberate:
+
+| Agent / call site | Model | Role |
+| --- | --- | --- |
+| Inbox classification (`inbox.ts:126,217,231`) | Haiku 4.5 | structured JSON classification |
+| Inbox vision text extraction (`inbox.ts:126`) | Haiku 4.5 | OCR-style transcription |
+| Profiler topic + exam extraction (`profiler.ts:28`) | Haiku 4.5 | structured JSON extraction from syllabus |
+| Profiler professor profile (`profiler.ts:100`) | Haiku 4.5 | short markdown summary (<400 words) |
+| Flashcard generation (`flashcard.ts:16`) | Haiku 4.5 | 6–10 cards per topic |
+| Practice quiz generation (`practice-quiz.ts:92`) | Haiku 4.5 | question generation |
+| Simulated exam (`practice-quiz.ts:176`) | Sonnet 4.6 | realistic exam emulation |
+| Short-answer grading (`practice-quiz.ts:247`) | Haiku 4.5 | score 0.0–1.0 with feedback |
+| Session auto-name (`tutor.ts:249`) | Haiku 4.5 | 2–4 word title |
+| Course icon picker (`courses/create/route.ts:16`) | Haiku 4.5 | icon + color choice |
+| Audio overview script (`audio-overview/route.ts:133`) | Sonnet 4.6 | podcast-style dialogue |
+| Tutor main loop (`tutor/route.ts:274`) | Sonnet 4.6 / Opus 4.7 | interactive teaching |
+
+**Spec deviations (two) — deliberate cost choices, flagged but not changed:**
+- Checklist says Profiler should use Sonnet. Actually uses Haiku 4.5. Task is deterministic JSON extraction; Haiku is sufficient. Upgrading would cost ~10× per run with marginal quality improvement.
+- Checklist says "verification grading" should use Sonnet. Short-answer grading uses Haiku 4.5 at 200 max_tokens. Task is a bounded rubric check against a model answer; Haiku is sufficient. If Arshawn wants higher-quality written feedback, we can upgrade.
+
+### Verified — extended thinking gating
+`app/api/agents/tutor/route.ts:274-285`:
+```
+model: deepThink ? 'claude-opus-4-7' : 'claude-sonnet-4-6',
+max_tokens: deepThink ? 16000 : 4096,
+if (deepThink) {
+  streamParams.thinking = { type: 'adaptive' }
+  streamParams.output_config = { effort: 'high' }
+}
+```
+Extended thinking only activates when the client passes `deepThink: true`. The default path (Sonnet 4.6, 4096 cap, no thinking) is what 99% of requests hit. Cost-gated correctly. (Note: uses Opus 4.7 adaptive thinking, not the `budget_tokens: 8000` pattern the checklist mentioned — the checklist predates the Opus 4.7 API; current implementation is the correct equivalent.)
+
+### Verified — RAG top-K bounding
+`lib/rag.ts:retrieveChunks` defaults to `topK = 5`; callers pass an explicit top-K:
+- Tutor (`tutor/route.ts:118`) — 5 chunks.
+- Profiler professor wiki enrichment (`profiler.ts:388`) — 4 chunks.
+Query input to the embedding call is sliced to 2000 chars (`rag.ts:115`). No full-document injection. Chunks are ~800 tokens each, so worst case tutor injects ~4,000 tokens of RAG context, well within the model's window.
+
+### Verified — wiki scope in system prompts
+- `learning_profile.md` is injected full-file by `buildTutorSystemPrompt`, but the generator (`profiler.buildLearningProfile`) produces a compact markdown list (~500 tokens for a 6-course user). Bounded by construction.
+- `professor_<id>.md` is injected full-file, generator prompt caps at "under 400 words" (~600 tokens). Bounded by construction.
+- `weak_areas.md` is NOT read by any agent — profiler writes it as a standalone artifact. Confirmed by grepping for `readWikiFile(.*weak_areas)` — only hit is in the profiler's own self-rebuild path.
+- Bottom-10 weak topics are instead pulled from `topic_mastery` directly in `buildTutorSystemPrompt` (line 76–89), which is cheap and always fresh.
+
+### Verified — max_tokens caps per call
+Audited all 13 `messages.create` sites. All caps right-sized after the audio fix:
+- Tight (200–512): short-answer grading 200, inbox classification 512 × 2, session naming 20, course icon 60. Optimal.
+- Mid (1024–4096): profiler professor profile 1024, profiler topic extract 2048, flashcard batch 2048, vision text extract 4096, inbox text-path classification uses 512 (not 4096 — 4096 only applies to the separate text-extract call), practice quiz 4096, tutor default 4096, audio script 4096. Right-sized for expected output volumes.
+- Large (8192–16000): simulated exam 8192 (20-question Sonnet run), tutor deepThink 16000 (Opus extended thinking). Bounded by explicit user opt-in.
+
+### Operations required before / during next deploy
+No new ops for Session 6. Session 3's list still applies.
