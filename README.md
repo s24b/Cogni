@@ -1,7 +1,7 @@
 <img src="assets/cogni-banner-github.png" width="100%" alt="Cogni" />
 
 <p align="center">
-  <img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="License" />
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="License" />
   <img src="https://img.shields.io/badge/Next.js-16-black" alt="Next.js" />
   <img src="https://img.shields.io/badge/TypeScript-5-3178C6" alt="TypeScript" />
   <img src="https://img.shields.io/badge/Supabase-PostgreSQL-3ECF8E" alt="Supabase" />
@@ -11,7 +11,17 @@
 
 <br />
 
-Cogni is a self-hosted AI study system for university students. It ingests your syllabi, builds a daily study plan weighted by how your professor grades, runs FSRS spaced repetition on your flashcards, and tutors you through course material with full session memory. BYOK, single-user, deployed on Vercel + Supabase.
+Cogni decides what to study, when to study, and how — so you just show up. Upload your syllabi once. It extracts your topics, maps your professor's grading weights, tracks your mastery across every topic, and generates a prioritized study plan every morning. The tutor knows where you're weakest and routes there automatically. Flashcards are scheduled by FSRS at the card and topic level. Study blocks land in your Google Calendar. All you do is study. BYOK, self-hosted on Vercel + Supabase.
+
+<br />
+
+## How it works
+
+1. **Upload a syllabus** — Claude extracts topics with professor weights, exam dates, and grade breakdowns. Your course is fully mapped in minutes.
+2. **Every morning, a plan is generated** — the scheduler scores every topic by mastery deficit, professor weight, and exam proximity. It allocates your session time, orders your flashcard review, and writes study blocks to Google Calendar.
+3. **Open the app and study** — flashcard review, tutor sessions, and quizzes all update your mastery in real time. Tomorrow's plan adapts to what you did today.
+
+You don't decide what to study. Cogni does.
 
 <br />
 
@@ -208,7 +218,7 @@ Vercel Cron Jobs do not run locally. The scheduler runs automatically when you n
 
 ## 📄 License
 
-[AGPL-3.0](LICENSE)
+[MIT](LICENSE) — Copyright (c) 2026 Arshawn Arbabi
 
 <br />
 
