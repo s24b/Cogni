@@ -91,6 +91,7 @@ You don't decide what to study. Cogni does.
 - **FSRS spaced repetition** — full card-level state (stability, difficulty, reps, lapses). 4-point ratings: Again / Hard / Good / Easy. Atomic RPC updates FSRS state and topic mastery in one transaction.
 - **AI study planner** — daily plan prioritized by mastery deficit × professor weight × exam proximity. Generates a 6-day ahead preview. Writes flashcard review blocks to Google Calendar.
 - **Claude-powered tutor** — four modes: Answer (direct), Teach (Socratic), Focus (weak-area routing), Essay (split-view editor with tracked changes). Deep thinking mode switches to Claude Opus 4.7 with extended thinking for hard problems. Native web search. Inline flashcard and quiz generation. Session persistence with auto-naming.
+- **Professor profiling** — builds a per-professor wiki from past exams, syllabi, and graded materials. Tracks question depth, phrasing style, and topic weights. Persists across semesters — add a new course with the same professor and their profile is already there.
 - **Syllabus profiler** — upload a PDF, Claude extracts topics with professor weights, exam dates, and grade breakdowns. RAG-enriched before extraction.
 - **RAG over course materials** — pgvector with OpenAI text-embedding-3-small (1536 dims). Keyword search fallback if no OpenAI key. Top-5 chunks injected into every tutor context.
 - **Inbox pipeline** — upload files or notes → Haiku (+ vision) classifies tier, course, and due date → auto-triggers profiler (tier 1) and flashcard generation (tier 1–2).
